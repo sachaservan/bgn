@@ -4,6 +4,8 @@ import (
 	"bgn"
 	"fmt"
 	"math/big"
+
+	"github.com/Nik-U/pbc"
 )
 
 func main() {
@@ -12,9 +14,44 @@ func main() {
 
 	println("\n***Begin Executing Demo****")
 
-	bits := 512 // length of p and q
+	bits := 512 // length of q1 and q2
+	n := 12     // number of decryption parties
+	exampleClassic(bits)
+	exampleMultiParty(bits, n)
 
-	bgn.NewMPKeyGen(bits, 20)
+	println("\n***End Executing Demo****\n")
+
+}
+
+func exampleMultiParty(bits int, numParties int) {
+
+	println("\n***Multi-party decryption****\n")
+
+	pk, shares, _ := bgn.NewMPKeyGen(bits, 20)
+
+	m1 := big.NewInt(51)
+	fmt.Println("\nP1 is: " + m1.String())
+
+	c1 := pk.Encrypt(m1)
+	fmt.Println("\n[LEVEL 1] E(P1) is: " + c1.String())
+
+	cskArray := []*pbc.Element{}
+	gskArray := []*pbc.Element{}
+
+	for _, share := range shares {
+
+		csk, gsk := share.PartialDecrypt(c1, pk)
+		cskArray = append(cskArray, csk)
+		gskArray = append(gskArray, gsk)
+	}
+
+	result := bgn.CombinedShares(cskArray, gskArray, pk)
+	fmt.Println("\nMulti-party decryption of [LEVEL 1] E(" + m1.String() + ") is: " + result.String() + ")")
+
+}
+
+func exampleClassic(bits int) {
+
 	pk, sk, _ := bgn.NewKeyGen(bits)
 	m1 := big.NewInt(2)
 	m2 := big.NewInt(3)
@@ -42,9 +79,6 @@ func main() {
 	fmt.Println("\nResult of " + "[LEVEL 1] E(" + m1.String() + ") * [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 2] E(" + plaintextMult.String() + ")")
 	fmt.Println("\nResult of " + "[LEVEL 2] E(" + plaintextMult.String() + ") + " + "[LEVEL 2] E(" + plaintextMult.String() + ") is: [LEVEL 2] E(" + sk.Decrypt2(c6, pk).String() + ")")
 	fmt.Println("\nResult of " + "[LEVEL 2] E(" + plaintextMult.String() + ") * " + constant.String() + " is: [LEVEL 2] E(" + sk.Decrypt2(c7, pk).String() + ")")
-
-	println("\n***End Executing Demo****\n\nBye!")
-
 }
 
 func printWelcome() {
