@@ -4,6 +4,7 @@ import (
 	"bgn"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/Nik-U/pbc"
 )
@@ -15,7 +16,7 @@ func main() {
 	println("\n***Begin Executing Demo****")
 
 	bits := 512 // length of q1 and q2
-	n := 12     // number of decryption parties
+	n := 8      // number of decryption parties
 	exampleClassic(bits)
 	exampleMultiParty(bits, n)
 
@@ -27,34 +28,53 @@ func exampleMultiParty(bits int, numParties int) {
 
 	println("\n***Multi-party decryption****\n")
 
-	pk, shares, _ := bgn.NewMPKeyGen(bits, 20)
+	pk, shares, _ := bgn.NewMPKeyGen(bits, numParties)
 
-	m1 := big.NewInt(51)
+	m1 := big.NewInt(24)
+	m2 := big.NewInt(23)
 	fmt.Println("\nP1 is: " + m1.String())
+	fmt.Println("\nP2 is: " + m2.String())
 
 	c1 := pk.Encrypt(m1)
+	c2 := pk.Encrypt(m2)
+	c3 := pk.EAdd(c1, c2)
+	c4 := pk.EMult(c1, c2)
+
 	fmt.Println("\n[LEVEL 1] E(P1) is: " + c1.String())
+	fmt.Println("\n[LEVEL 1] E(P2) is: " + c2.String())
 
 	cskArray := []*pbc.Element{}
 	gskArray := []*pbc.Element{}
 
-	for _, share := range shares {
-
-		csk, gsk := share.PartialDecrypt(c1, pk)
+	for index, share := range shares {
+		csk, gsk := share.PartialDecrypt(c3, pk)
 		cskArray = append(cskArray, csk)
 		gskArray = append(gskArray, gsk)
+		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + csk.String())
 	}
 
-	result := bgn.CombinedShares(cskArray, gskArray, pk)
-	fmt.Println("\nMulti-party decryption of [LEVEL 1] E(" + m1.String() + ") is: " + result.String() + ")")
+	resultAdd := bgn.CombinedShares(cskArray, gskArray, pk)
+
+	cskArray = []*pbc.Element{}
+	gskArray = []*pbc.Element{}
+	for index, share := range shares {
+		csk, gsk := share.PartialDecrypt2(c4, pk)
+		cskArray = append(cskArray, csk)
+		gskArray = append(gskArray, gsk)
+		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + csk.String())
+	}
+
+	resultMult := bgn.CombinedShares(cskArray, gskArray, pk)
+	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") + [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 1] E(" + resultAdd.String() + ")\n")
+	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") * [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 2] E(" + resultMult.String() + ")\n")
 
 }
 
 func exampleClassic(bits int) {
 
 	pk, sk, _ := bgn.NewKeyGen(bits)
-	m1 := big.NewInt(2)
-	m2 := big.NewInt(3)
+	m1 := big.NewInt(21)
+	m2 := big.NewInt(32)
 	constant := big.NewInt(10)
 
 	fmt.Println("\nP1 is: " + m1.String())

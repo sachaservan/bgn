@@ -16,20 +16,19 @@ import (
 type PublicKey struct {
 	Pairing *pbc.Pairing
 	G1      *pbc.Element
-	GT      *pbc.Element
-	g       *pbc.Element
-	h       *pbc.Element
-	n       *big.Int
+	P       *pbc.Element
+	Q       *pbc.Element
+	N       *big.Int
 }
 
 // SecretKey used for decryption of ciphertexts
 type SecretKey struct {
-	key *big.Int
+	Key *big.Int
 }
 
 // SecretKeyShare is a share of a secret key
 type SecretKeyShare struct {
-	share *big.Int
+	Share *big.Int
 }
 
 // NewMPKeyGen generates a new public key and n shares of a secret key
@@ -47,7 +46,7 @@ func NewMPKeyGen(bits int, n int) (*PublicKey, []*SecretKeyShare, error) {
 	var shares []*SecretKeyShare
 
 	// max value of each share (no bigger than sk/n)
-	max := big.NewInt(0).Div(sk.key, big.NewInt(int64(n)))
+	max := big.NewInt(0).Div(sk.Key, big.NewInt(int64(n)))
 
 	// sum of all the shares
 	sum := big.NewInt(0)
@@ -57,12 +56,12 @@ func NewMPKeyGen(bits int, n int) (*PublicKey, []*SecretKeyShare, error) {
 		// create new random share
 		next := newCryptoRandom(max)
 		shares = append(shares, &SecretKeyShare{next})
-		sum = big.NewInt(0).Add(sum, next)
+		sum.Add(sum, next)
 	}
 
 	// last share should be computed so as to
 	// have all shares add up to sk
-	last := big.NewInt(0).Sub(sk.key, sum)
+	last := sum.Sub(sk.Key, sum)
 	shares = append(shares, &SecretKeyShare{last})
 
 	return pk, shares, err
@@ -77,9 +76,9 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 
 	var q1 *big.Int    // random prime
 	var q2 *big.Int    // secret key (random prime)
-	var n *big.Int     // n = r*q
-	var g *pbc.Element // field element
-	var h *pbc.Element // field element
+	var N *big.Int     // n = r*q
+	var P *pbc.Element // field element
+	var Q *pbc.Element // field element
 
 	// generate a new random prime r
 	q1, err := rand.Prime(rand.Reader, bits)
@@ -92,8 +91,8 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 	}
 
 	// compute the product of the primes
-	n = big.NewInt(0).Mul(q1, q2)
-	params := pbc.GenerateA1(n)
+	N = big.NewInt(0).Mul(q1, q2)
+	params := pbc.GenerateA1(N)
 
 	if err != nil {
 		return nil, nil, err
@@ -105,23 +104,22 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 	// generate the two multiplicative groups of
 	// order n (using pbc pairing library)
 	G1 := pairing.NewG1()
-	GT := pairing.NewGT()
 
 	// obtain l generated from the pbc library
 	// is a "small" number s.t. p + 1 = l*n
 	l, err := parseLFromParams(params)
 
 	// choose random point P in G1
-	g = G1.Rand()
-	g.PowBig(g, l)
+	P = G1.Rand()
+	P.PowBig(P, l)
 
 	// choose random Q in G1
-	h = G1.NewFieldElement()
-	h.PowBig(g, newCryptoRandom(n))
-	h.PowBig(h, q2)
+	Q = G1.NewFieldElement()
+	Q.PowBig(P, newCryptoRandom(N))
+	Q.PowBig(Q, q2)
 
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, GT, g, h, n}
+	pk := &PublicKey{pairing, G1, P, Q, N}
 
 	// create secret key
 	sk := &SecretKey{q1}
@@ -132,13 +130,13 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 // Encrypt a given message m with the public key pk
 func (pk *PublicKey) Encrypt(m *big.Int) *pbc.Element {
 
-	r := newCryptoRandom(pk.n)
+	r := newCryptoRandom(pk.N)
 
 	G := pk.G1.NewFieldElement()
 	H := pk.G1.NewFieldElement()
 
-	G.PowBig(pk.g, m)
-	H.PowBig(pk.h, r)
+	G.PowBig(pk.P, m)
+	H.PowBig(pk.Q, r)
 
 	C := pk.G1.NewFieldElement()
 	C.Mul(G, H)
@@ -153,8 +151,8 @@ func (sk *SecretKey) Decrypt(C *pbc.Element, pk *PublicKey) *big.Int {
 	csk := pk.G1.NewFieldElement()
 	aux := pk.G1.NewFieldElement()
 
-	gsk.PowBig(pk.g, sk.key)
-	csk.PowBig(C, sk.key)
+	gsk.PowBig(pk.P, sk.Key)
+	csk.PowBig(C, sk.Key)
 
 	aux.Set(gsk)
 
@@ -179,16 +177,27 @@ func (sk *SecretKeyShare) PartialDecrypt(C *pbc.Element, pk *PublicKey) (*pbc.El
 	csk := pk.G1.NewFieldElement()
 	gsk := pk.G1.NewFieldElement()
 
-	csk.PowBig(C, sk.share)
-	gsk.PowBig(pk.g, sk.share)
+	csk.PowBig(C, sk.Share)
+	gsk.PowBig(pk.P, sk.Share)
+
+	return csk, gsk
+}
+
+func (sk *SecretKeyShare) PartialDecrypt2(C *pbc.Element, pk *PublicKey) (*pbc.Element, *pbc.Element) {
+
+	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	gsk.PowBig(gsk, sk.Share)
+
+	csk := C.NewFieldElement()
+	csk.PowBig(C, sk.Share)
 
 	return csk, gsk
 }
 
 func CombinedShares(cskShares []*pbc.Element, gskShares []*pbc.Element, pk *PublicKey) *big.Int {
 
-	csk := pk.G1.NewFieldElement()
-	gsk := pk.G1.NewFieldElement()
+	csk := cskShares[0].NewFieldElement()
+	gsk := gskShares[0].NewFieldElement()
 
 	csk.Set(cskShares[0])
 	for index, partial := range cskShares {
@@ -230,11 +239,11 @@ func CombinedShares(cskShares []*pbc.Element, gskShares []*pbc.Element, pk *Publ
 // Decrypt2 a level 2 (multiplied) ciphertext C using secret key sk
 func (sk *SecretKey) Decrypt2(C *pbc.Element, pk *PublicKey) *big.Int {
 
-	gsk := pk.GT.Pair(pk.g, pk.g)
-	gsk.PowBig(gsk, sk.key)
+	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	gsk.PowBig(gsk, sk.Key)
 
 	csk := C.NewFieldElement()
-	csk.PowBig(C, sk.key)
+	csk.PowBig(C, sk.Key)
 
 	aux := gsk.NewFieldElement()
 	aux.Set(gsk)
@@ -261,9 +270,9 @@ func (pk *PublicKey) EAdd(element1 *pbc.Element, element2 *pbc.Element) *pbc.Ele
 	result := pk.G1.NewFieldElement()
 	result.Mul(element1, element2)
 
-	r := newCryptoRandom(pk.n)
+	r := newCryptoRandom(pk.N)
 	h1 := pk.G1.NewFieldElement()
-	h1.PowBig(pk.h, r)
+	h1.PowBig(pk.Q, r)
 
 	return result.Mul(result, h1)
 }
@@ -271,14 +280,14 @@ func (pk *PublicKey) EAdd(element1 *pbc.Element, element2 *pbc.Element) *pbc.Ele
 // EAdd2 adds two level 2 (multiplied) ciphertexts together and returns the result
 func (pk *PublicKey) EAdd2(element1 *pbc.Element, element2 *pbc.Element) *pbc.Element {
 
-	result := pk.GT.NewFieldElement()
+	result := pk.Pairing.NewGT().NewFieldElement()
 	result.Mul(element1, element2)
 
-	r := newCryptoRandom(pk.n)
-	h1 := pk.GT.Pair(pk.h, pk.h)
-	h1.PowBig(h1, r)
+	r := newCryptoRandom(pk.N)
+	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	q.PowBig(q, r)
 
-	return result.Mul(result, h1)
+	return result.Mul(result, q)
 }
 
 // EMultC multiplies a level 1 (non-multiplied) ciphertext with a plaintext constant
@@ -288,38 +297,38 @@ func (pk *PublicKey) EMultC(element1 *pbc.Element, constant *big.Int) *pbc.Eleme
 	result := pk.G1.NewFieldElement()
 	result.MulBig(element1, constant)
 
-	r := newCryptoRandom(pk.n)
-	h1 := pk.G1.NewFieldElement()
-	h1.MulBig(pk.h, r)
+	r := newCryptoRandom(pk.N)
+	q := pk.G1.NewFieldElement()
+	q.MulBig(pk.Q, r)
 
-	return result.Mul(result, h1)
+	return result.Mul(result, q)
 }
 
 // EMultC2 multiplies a level 2 (multiplied) ciphertext with a plaintext constant
 // and returns the result
 func (pk *PublicKey) EMultC2(element1 *pbc.Element, constant *big.Int) *pbc.Element {
 
-	result := pk.GT.NewFieldElement()
+	result := pk.Pairing.NewGT().NewFieldElement()
 	result.MulBig(element1, constant)
 
-	r := newCryptoRandom(pk.n)
-	h1 := pk.GT.Pair(pk.h, pk.h)
-	h1.PowBig(h1, r)
+	r := newCryptoRandom(pk.N)
+	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	q.PowBig(q, r)
 
-	return result.Mul(result, h1)
+	return result.Mul(result, q)
 }
 
 // EMult multiplies two level 1 (non-multiplied) ciphertext together and returns the result
 func (pk *PublicKey) EMult(element1 *pbc.Element, element2 *pbc.Element) *pbc.Element {
 
-	result := pk.GT.NewFieldElement()
+	result := pk.Pairing.NewGT().NewFieldElement()
 	result = result.Pair(element1, element2)
 
-	r := newCryptoRandom(pk.n)
-	h1 := pk.Pairing.NewGT().Pair(pk.h, pk.h)
-	h1.PowBig(h1, r)
+	r := newCryptoRandom(pk.N)
+	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	q.PowBig(q, r)
 
-	return result.Mul(result, h1)
+	return result.Mul(result, q)
 }
 
 // generates a new random number < max
