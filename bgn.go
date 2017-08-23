@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log"
 	"math/big"
+	"strconv"
+	"strings"
 
 	"github.com/Nik-U/pbc"
 )
@@ -69,8 +71,8 @@ func NewMPKeyGen(bits int, n int) (*PublicKey, []*SecretKeyShare, error) {
 // NewKeyGen creates a new public/private key pair of size bits
 func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 
-	if bits < 128 {
-		return nil, nil, errors.New("key bits must be > 128")
+	if bits < 32 {
+		return nil, nil, errors.New("key bits must be > 32")
 	}
 
 	var q1 *big.Int    // random prime
@@ -105,11 +107,17 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 	G1 := pairing.NewG1()
 	GT := pairing.NewGT()
 
+	// obtain l generated from the pbc library
+	// is a "small" number s.t. p + 1 = l*n
+	l, err := parseLFromParams(params)
+
 	// choose random point P in G1
 	g = G1.Rand()
+	g.PowBig(g, l)
 
 	// choose random Q in G1
 	h = G1.NewFieldElement()
+	h.PowBig(g, newCryptoRandom(n))
 	h.PowBig(h, q2)
 
 	// create public key with the generated groups
@@ -148,6 +156,59 @@ func (sk *SecretKey) Decrypt(C *pbc.Element, pk *PublicKey) *big.Int {
 	gsk.PowBig(pk.g, sk.key)
 	csk.PowBig(C, sk.key)
 
+	aux.Set(gsk)
+
+	// brute force compute the discrete log
+	// TODO: use kangaroo!
+	m := big.NewInt(1)
+
+	for {
+		if aux.Equals(csk) {
+			break
+		}
+
+		aux = aux.Mul(aux, gsk)
+		m = m.Add(m, big.NewInt(1))
+	}
+
+	return m
+}
+
+func (sk *SecretKeyShare) PartialDecrypt(C *pbc.Element, pk *PublicKey) (*pbc.Element, *pbc.Element) {
+
+	csk := pk.G1.NewFieldElement()
+	gsk := pk.G1.NewFieldElement()
+
+	csk.PowBig(C, sk.share)
+	gsk.PowBig(pk.g, sk.share)
+
+	return csk, gsk
+}
+
+func CombinedShares(cskShares []*pbc.Element, gskShares []*pbc.Element, pk *PublicKey) *big.Int {
+
+	csk := pk.G1.NewFieldElement()
+	gsk := pk.G1.NewFieldElement()
+
+	csk.Set(cskShares[0])
+	for index, partial := range cskShares {
+		if index == 0 {
+			continue
+		}
+
+		csk.Mul(csk, partial)
+	}
+
+	gsk.Set(gskShares[0])
+	for index, partial := range gskShares {
+		if index == 0 {
+			continue
+		}
+
+		gsk.Mul(gsk, partial)
+	}
+
+	aux := gsk.NewFieldElement()
 	aux.Set(gsk)
 
 	// brute force compute the discrete log
@@ -269,4 +330,23 @@ func newCryptoRandom(max *big.Int) *big.Int {
 	}
 
 	return rand
+}
+
+// TOTAL HACK to access the generated "l" in the C struct
+// which the PBC library holds. The golang wrapper has
+// no means of accessing the struct variable without
+// knowing the exact memory mapping. Better approach
+// would be to either compute l on the fly or figure
+// out the memory mapping between the C struct and
+// golang equivalent
+func parseLFromParams(params *pbc.Params) (*big.Int, error) {
+
+	paramsStr := params.String()
+	lStr := paramsStr[strings.Index(paramsStr, "l")+2 : len(paramsStr)-1]
+	lInt, err := strconv.ParseInt(lStr, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+
+	return big.NewInt(lInt), nil
 }
