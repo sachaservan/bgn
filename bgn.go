@@ -11,6 +11,25 @@ import (
 	"github.com/Nik-U/pbc"
 )
 
+type Plaintext struct {
+	M           *big.Int // ciphertext (numerator if rational number)
+	Denominator *big.Int // denominator (if rational number)
+	IsRat       bool
+}
+
+type Ciphertext struct {
+	C           *pbc.Element // ciphertext (numerator if rational number)
+	Denominator *big.Int     // denominator (if rational number)
+	IsRat       bool
+}
+
+type PartialDecrypt struct {
+	Csk         *pbc.Element
+	Gsk         *pbc.Element
+	Denominator *big.Int
+	IsRat       bool
+}
+
 // PublicKey is the BGN public key used for encryption
 // as well as performing homomorphic operations on ciphertexts
 type PublicKey struct {
@@ -29,6 +48,14 @@ type SecretKey struct {
 // SecretKeyShare is a share of a secret key
 type SecretKeyShare struct {
 	Share *big.Int
+}
+
+func NewPlaintextInt(m *big.Int) *Plaintext {
+	return &Plaintext{m, big.NewInt(1), false}
+}
+
+func NewPlaintextRat(m *big.Rat) *Plaintext {
+	return &Plaintext{m.Num(), m.Denom(), true}
 }
 
 // NewMPKeyGen generates a new public key and n shares of a secret key
@@ -127,8 +154,17 @@ func NewKeyGen(bits int) (*PublicKey, *SecretKey, error) {
 	return pk, sk, err
 }
 
-// Encrypt a given message m with the public key pk
-func (pk *PublicKey) Encrypt(m *big.Int) *pbc.Element {
+// Encrypt a given plaintext (integer or rational) with the public key pk
+func (pk *PublicKey) Encrypt(plaintext *Plaintext) *Ciphertext {
+
+	m := plaintext.M
+	d := plaintext.Denominator
+	if plaintext.IsRat {
+		// TODO: better hiding factor
+		u := big.NewInt(1) //newCryptoRandom(big.NewInt(A LARGE NUMBER HERE))
+		m.Mul(m, u)
+		d.Mul(d, u)
+	}
 
 	r := newCryptoRandom(pk.N)
 
@@ -141,18 +177,18 @@ func (pk *PublicKey) Encrypt(m *big.Int) *pbc.Element {
 	C := pk.G1.NewFieldElement()
 	C.Mul(G, H)
 
-	return C
+	return &Ciphertext{C, d, plaintext.IsRat}
 }
 
 // Decrypt a level 1 (non-multiplied) ciphertext C using secret key sk
-func (sk *SecretKey) Decrypt(C *pbc.Element, pk *PublicKey) *big.Int {
+func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 
 	gsk := pk.G1.NewFieldElement()
 	csk := pk.G1.NewFieldElement()
 	aux := pk.G1.NewFieldElement()
 
 	gsk.PowBig(pk.P, sk.Key)
-	csk.PowBig(C, sk.Key)
+	csk.PowBig(ct.C, sk.Key)
 
 	aux.Set(gsk)
 
@@ -169,81 +205,17 @@ func (sk *SecretKey) Decrypt(C *pbc.Element, pk *PublicKey) *big.Int {
 		m = m.Add(m, big.NewInt(1))
 	}
 
-	return m
-}
-
-func (sk *SecretKeyShare) PartialDecrypt(C *pbc.Element, pk *PublicKey) (*pbc.Element, *pbc.Element) {
-
-	csk := pk.G1.NewFieldElement()
-	gsk := pk.G1.NewFieldElement()
-
-	csk.PowBig(C, sk.Share)
-	gsk.PowBig(pk.P, sk.Share)
-
-	return csk, gsk
-}
-
-func (sk *SecretKeyShare) PartialDecrypt2(C *pbc.Element, pk *PublicKey) (*pbc.Element, *pbc.Element) {
-
-	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	gsk.PowBig(gsk, sk.Share)
-
-	csk := C.NewFieldElement()
-	csk.PowBig(C, sk.Share)
-
-	return csk, gsk
-}
-
-func CombinedShares(cskShares []*pbc.Element, gskShares []*pbc.Element, pk *PublicKey) *big.Int {
-
-	csk := cskShares[0].NewFieldElement()
-	gsk := gskShares[0].NewFieldElement()
-
-	csk.Set(cskShares[0])
-	for index, partial := range cskShares {
-		if index == 0 {
-			continue
-		}
-
-		csk.Mul(csk, partial)
-	}
-
-	gsk.Set(gskShares[0])
-	for index, partial := range gskShares {
-		if index == 0 {
-			continue
-		}
-
-		gsk.Mul(gsk, partial)
-	}
-
-	aux := gsk.NewFieldElement()
-	aux.Set(gsk)
-
-	// brute force compute the discrete log
-	// TODO: use kangaroo!
-	m := big.NewInt(1)
-
-	for {
-		if aux.Equals(csk) {
-			break
-		}
-
-		aux = aux.Mul(aux, gsk)
-		m = m.Add(m, big.NewInt(1))
-	}
-
-	return m
+	return &Plaintext{m, ct.Denominator, ct.IsRat}
 }
 
 // Decrypt2 a level 2 (multiplied) ciphertext C using secret key sk
-func (sk *SecretKey) Decrypt2(C *pbc.Element, pk *PublicKey) *big.Int {
+func (sk *SecretKey) Decrypt2(ct *Ciphertext, pk *PublicKey) *Plaintext {
 
 	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
 	gsk.PowBig(gsk, sk.Key)
 
-	csk := C.NewFieldElement()
-	csk.PowBig(C, sk.Key)
+	csk := ct.C.NewFieldElement()
+	csk.PowBig(ct.C, sk.Key)
 
 	aux := gsk.NewFieldElement()
 	aux.Set(gsk)
@@ -261,74 +233,180 @@ func (sk *SecretKey) Decrypt2(C *pbc.Element, pk *PublicKey) *big.Int {
 		m = m.Add(m, big.NewInt(1))
 	}
 
-	return m
+	return &Plaintext{m, ct.Denominator, ct.IsRat}
 }
 
 // EAdd adds two level 1 (non-multiplied) ciphertexts together and returns the result
-func (pk *PublicKey) EAdd(element1 *pbc.Element, element2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) EAdd(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
+
+	if (ct1.IsRat || ct2.IsRat) && ct1.Denominator.Cmp(ct2.Denominator) != 0 {
+
+		// compute common denominator
+		ct1a := pk.EMultC(ct1, ct2.Denominator)
+		ct2a := pk.EMultC(ct2, ct1.Denominator)
+		ct1a.Denominator.Mul(ct1.Denominator, ct2.Denominator)
+		ct2a.Denominator.Set(ct1a.Denominator)
+		ct1a.IsRat = true
+		ct2a.IsRat = true
+		// add the two ciphertexts now that they have a common denominator
+		return pk.EAdd(ct1a, ct2a)
+	}
 
 	result := pk.G1.NewFieldElement()
-	result.Mul(element1, element2)
+	result.Mul(ct1.C, ct2.C)
 
 	r := newCryptoRandom(pk.N)
 	h1 := pk.G1.NewFieldElement()
 	h1.PowBig(pk.Q, r)
 
-	return result.Mul(result, h1)
+	c := result.Mul(result, h1)
+	return &Ciphertext{c, ct1.Denominator, (ct1.IsRat || ct2.IsRat)}
 }
 
 // EAdd2 adds two level 2 (multiplied) ciphertexts together and returns the result
-func (pk *PublicKey) EAdd2(element1 *pbc.Element, element2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) EAdd2(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
+
+	if (ct1.IsRat || ct2.IsRat) && ct1.Denominator.Cmp(ct2.Denominator) != 0 {
+
+		// compute common denominator
+		ct1a := pk.EMultC2(ct1, ct2.Denominator)
+		ct2a := pk.EMultC2(ct2, ct1.Denominator)
+		ct1a.Denominator.Mul(ct1.Denominator, ct2.Denominator)
+		ct2a.Denominator.Mul(ct2.Denominator, ct1.Denominator)
+		ct1a.IsRat = true
+		ct2a.IsRat = true
+		// add the two ciphertexts now that they have a common denominator
+		return pk.EAdd2(ct1a, ct2a)
+	}
 
 	result := pk.Pairing.NewGT().NewFieldElement()
-	result.Mul(element1, element2)
+	result.Mul(ct1.C, ct2.C)
 
 	r := newCryptoRandom(pk.N)
-	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
-	q.PowBig(q, r)
+	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	pair.PowBig(pair, r)
 
-	return result.Mul(result, q)
+	result.Mul(result, pair)
+
+	return &Ciphertext{result, ct1.Denominator, (ct1.IsRat || ct2.IsRat)}
 }
 
 // EMultC multiplies a level 1 (non-multiplied) ciphertext with a plaintext constant
 // and returns the result
-func (pk *PublicKey) EMultC(element1 *pbc.Element, constant *big.Int) *pbc.Element {
+func (pk *PublicKey) EMultC(ct *Ciphertext, constant *big.Int) *Ciphertext {
 
 	result := pk.G1.NewFieldElement()
-	result.MulBig(element1, constant)
+	result.MulBig(ct.C, constant)
 
 	r := newCryptoRandom(pk.N)
 	q := pk.G1.NewFieldElement()
 	q.MulBig(pk.Q, r)
 
-	return result.Mul(result, q)
+	result.Mul(result, q)
+	return &Ciphertext{result, ct.Denominator, ct.IsRat}
 }
 
 // EMultC2 multiplies a level 2 (multiplied) ciphertext with a plaintext constant
 // and returns the result
-func (pk *PublicKey) EMultC2(element1 *pbc.Element, constant *big.Int) *pbc.Element {
+func (pk *PublicKey) EMultC2(ct *Ciphertext, constant *big.Int) *Ciphertext {
 
 	result := pk.Pairing.NewGT().NewFieldElement()
-	result.MulBig(element1, constant)
+	result.MulBig(ct.C, constant)
 
 	r := newCryptoRandom(pk.N)
-	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
-	q.PowBig(q, r)
+	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	pair.PowBig(pair, r)
 
-	return result.Mul(result, q)
+	result.Mul(result, pair)
+	return &Ciphertext{result, ct.Denominator, ct.IsRat}
 }
 
 // EMult multiplies two level 1 (non-multiplied) ciphertext together and returns the result
-func (pk *PublicKey) EMult(element1 *pbc.Element, element2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
+
+	if (ct1.IsRat || ct2.IsRat) && ct1.Denominator.Cmp(ct2.Denominator) != 0 {
+
+		// compute common denominator
+		ct1a := ct1
+		ct2a := ct2
+		ct1a.Denominator.Mul(ct1a.Denominator, ct2a.Denominator)
+		ct2a.Denominator = ct1a.Denominator
+		ct1a.IsRat = true
+		ct2a.IsRat = true
+
+		return pk.EMult(ct1a, ct2a)
+	}
 
 	result := pk.Pairing.NewGT().NewFieldElement()
-	result = result.Pair(element1, element2)
+	result = result.Pair(ct1.C, ct2.C)
 
 	r := newCryptoRandom(pk.N)
-	q := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
-	q.PowBig(q, r)
+	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	pair.PowBig(pair, r)
 
-	return result.Mul(result, q)
+	result.Mul(result, pair)
+	return &Ciphertext{result, ct1.Denominator, ct1.IsRat}
+}
+
+func (sk *SecretKeyShare) PartialDecrypt(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
+
+	csk := pk.G1.NewFieldElement()
+	gsk := pk.G1.NewFieldElement()
+
+	csk.PowBig(ct.C, sk.Share)
+	gsk.PowBig(pk.P, sk.Share)
+
+	return &PartialDecrypt{csk, gsk, ct.Denominator, ct.IsRat}
+}
+
+func (sk *SecretKeyShare) PartialDecrypt2(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
+
+	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	gsk.PowBig(gsk, sk.Share)
+
+	csk := ct.C.NewFieldElement()
+	csk.PowBig(ct.C, sk.Share)
+
+	return &PartialDecrypt{csk, gsk, ct.Denominator, ct.IsRat}
+}
+
+func CombinedShares(shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
+
+	csk := shares[0].Csk.NewFieldElement()
+	gsk := shares[0].Gsk.NewFieldElement()
+
+	csk.Set(shares[0].Csk)
+	gsk.Set(shares[0].Gsk)
+
+	for index, share := range shares {
+		if index == 0 {
+			continue
+		}
+
+		csk.Mul(csk, share.Csk)
+		gsk.Mul(gsk, share.Gsk)
+	}
+
+	denominator := shares[0].Denominator
+	isRat := shares[0].IsRat
+
+	aux := gsk.NewFieldElement()
+	aux.Set(gsk)
+
+	// brute force compute the discrete log
+	// TODO: use kangaroo!
+	m := big.NewInt(1)
+
+	for {
+		if aux.Equals(csk) {
+			break
+		}
+
+		aux = aux.Mul(aux, gsk)
+		m = m.Add(m, big.NewInt(1))
+	}
+
+	return &Plaintext{m, denominator, isRat}
 }
 
 // generates a new random number < max
@@ -358,4 +436,24 @@ func parseLFromParams(params *pbc.Params) (*big.Int, error) {
 	}
 
 	return big.NewInt(lInt), nil
+}
+
+func (c *Ciphertext) String() string {
+
+	if c.IsRat {
+		return c.C.String() + " / " + c.Denominator.String()
+	}
+	return c.C.String()
+}
+
+func (p *Plaintext) String() string {
+
+	if p.IsRat {
+		floatNum := big.NewFloat(0).SetInt(p.M)
+		floatDenom := big.NewFloat(0).SetInt(p.Denominator)
+
+		result := big.NewFloat(0).Quo(floatNum, floatDenom)
+		return result.String() + "f"
+	}
+	return p.M.String()
 }

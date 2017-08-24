@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-
-	"github.com/Nik-U/pbc"
 )
 
 func main() {
@@ -17,11 +15,32 @@ func main() {
 
 	bits := 512 // length of q1 and q2
 	n := 8      // number of decryption parties
+	exampleRationalNumbers(bits)
 	exampleClassic(bits)
 	exampleMultiParty(bits, n)
 
 	println("\n***End Executing Demo****\n")
 
+}
+
+func exampleRationalNumbers(bits int) {
+
+	pk, sk, _ := bgn.NewKeyGen(bits)
+	m1 := bgn.NewPlaintextRat(big.NewRat(0, 1).SetFloat64(1.5))
+	m2 := bgn.NewPlaintextRat(big.NewRat(0, 1).SetFloat64(1.25))
+
+	c1 := pk.Encrypt(m1)
+	c2 := pk.Encrypt(m2)
+
+	fmt.Println("P1: " + m1.String())
+	fmt.Println("P2: " + m2.String())
+
+	fmt.Println("C1: " + c1.String())
+	fmt.Println("C2: " + c2.String())
+
+	c3 := pk.EAdd(c1, c2)
+
+	fmt.Println("DECRYPTION OF RATIONAL NUMBER IS " + sk.Decrypt(c3, pk).String())
 }
 
 func exampleMultiParty(bits int, numParties int) {
@@ -30,8 +49,8 @@ func exampleMultiParty(bits int, numParties int) {
 
 	pk, shares, _ := bgn.NewMPKeyGen(bits, numParties)
 
-	m1 := big.NewInt(24)
-	m2 := big.NewInt(23)
+	m1 := bgn.NewPlaintextInt(big.NewInt(24))
+	m2 := bgn.NewPlaintextInt(big.NewInt(23))
 	fmt.Println("\nP1 is: " + m1.String())
 	fmt.Println("\nP2 is: " + m2.String())
 
@@ -43,28 +62,25 @@ func exampleMultiParty(bits int, numParties int) {
 	fmt.Println("\n[LEVEL 1] E(P1) is: " + c1.String())
 	fmt.Println("\n[LEVEL 1] E(P2) is: " + c2.String())
 
-	cskArray := []*pbc.Element{}
-	gskArray := []*pbc.Element{}
+	partialDecryptions := []*bgn.PartialDecrypt{}
 
 	for index, share := range shares {
-		csk, gsk := share.PartialDecrypt(c3, pk)
-		cskArray = append(cskArray, csk)
-		gskArray = append(gskArray, gsk)
-		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + csk.String())
+		partial := share.PartialDecrypt(c3, pk)
+		partialDecryptions = append(partialDecryptions, partial)
+		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + partial.Csk.String())
 	}
 
-	resultAdd := bgn.CombinedShares(cskArray, gskArray, pk)
+	resultAdd := bgn.CombinedShares(partialDecryptions, pk)
 
-	cskArray = []*pbc.Element{}
-	gskArray = []*pbc.Element{}
+	partialDecryptions = []*bgn.PartialDecrypt{}
 	for index, share := range shares {
-		csk, gsk := share.PartialDecrypt2(c4, pk)
-		cskArray = append(cskArray, csk)
-		gskArray = append(gskArray, gsk)
-		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + csk.String())
+		partial := share.PartialDecrypt2(c4, pk)
+		partialDecryptions = append(partialDecryptions, partial)
+		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + partial.Csk.String())
 	}
 
-	resultMult := bgn.CombinedShares(cskArray, gskArray, pk)
+	resultMult := bgn.CombinedShares(partialDecryptions, pk)
+
 	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") + [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 1] E(" + resultAdd.String() + ")\n")
 	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") * [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 2] E(" + resultMult.String() + ")\n")
 
@@ -73,8 +89,8 @@ func exampleMultiParty(bits int, numParties int) {
 func exampleClassic(bits int) {
 
 	pk, sk, _ := bgn.NewKeyGen(bits)
-	m1 := big.NewInt(21)
-	m2 := big.NewInt(32)
+	m1 := bgn.NewPlaintextInt(big.NewInt(25))
+	m2 := bgn.NewPlaintextInt(big.NewInt(7))
 	constant := big.NewInt(10)
 
 	fmt.Println("\nP1 is: " + m1.String())
