@@ -2,6 +2,7 @@ package bgn
 
 import (
 	"crypto/rand"
+	"errors"
 	"log"
 	"math"
 	"math/big"
@@ -18,8 +19,10 @@ type PublicKey struct {
 	G1          *pbc.Element // G1 group
 	P           *pbc.Element // generator of G1
 	Q           *pbc.Element
-	N           *big.Int // product of two primes
-	T           *big.Int
+	N           *big.Int     // product of two primes
+	T           *big.Int     // message space T
+	DT          *pbc.Element // encrypted q2-T
+	Sk          *big.Int     // REMOVE! TODO: GET RID OF THIS
 	PolyBase    int
 	FPPrecision int
 }
@@ -49,6 +52,8 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretK
 	// generate a new random prime q (this will be the secret key)
 	q2, err = rand.Prime(rand.Reader, keyBits)
 
+	T := big.NewInt(100000)
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,7 +75,7 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretK
 
 	// obtain l generated from the pbc library
 	// is a "small" number s.t. p + 1 = l*n
-	l, err := parseLFromParams(params)
+	l, err := parseLFromPBCParams(params)
 
 	// choose random point P in G1
 	P = G1.Rand()
@@ -82,7 +87,11 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretK
 	Q.PowBig(Q, q2)
 
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, P, Q, N, q2, polyBase, fpPrecision}
+	pk := &PublicKey{pairing, G1, P, Q, N, T, nil, q2, polyBase, fpPrecision}
+
+	s := big.NewInt(0).Sub(q2, T)
+	DT := pk.encrypt(s)
+	pk.DT = DT
 
 	// create secret key
 	sk := &SecretKey{q1, polyBase}
@@ -93,181 +102,431 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretK
 // Encrypt a given plaintext (integer or rational) with the public key pk
 func (pk *PublicKey) Encrypt(pt *Plaintext) *Ciphertext {
 
-	size := len(pt.Coefficients)
-	encryptedCoeffs := make([]*pbc.Element, size)
+	encryptedCoefficients := make([]*pbc.Element, pt.Degree)
 
-	for i, coeff := range pt.Coefficients {
+	for i := 0; i < pt.Degree; i++ {
 
-		bigCoeff := big.NewInt(coeff)
-
-		if coeff < 0 {
-			bigCoeff.Add(pk.T, bigCoeff) // a^-1 = N-a
+		negative := pt.Coefficients[i] < 0
+		if negative {
+			positive := -1 * pt.Coefficients[i]
+			coeff := big.NewInt(positive)
+			encryptedCoefficients[i] = pk.eSubElements(pk.encryptZero(), pk.encrypt(coeff))
+		} else {
+			coeff := big.NewInt(pt.Coefficients[i])
+			encryptedCoefficients[i] = pk.encrypt(coeff)
 		}
-
-		r := newCryptoRandom(pk.N)
-
-		G := pk.G1.NewFieldElement()
-		H := pk.G1.NewFieldElement()
-
-		G.PowBig(pk.P, bigCoeff)
-		H.PowBig(pk.Q, r)
-
-		C := pk.G1.NewFieldElement()
-		C.Mul(G, H)
-		encryptedCoeffs[i] = C
 	}
 
-	return &Ciphertext{encryptedCoeffs, pt.ScaleFactor}
+	return &Ciphertext{encryptedCoefficients, pt.Degree, pt.ScaleFactor, false}
 }
 
-// Decrypt a level 1 (non-multiplied) ciphertext C using secret key sk
-func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
+// AInv returns the additive inverse of the level1 ciphertext
+func (pk *PublicKey) AInv(ct *Ciphertext) *Ciphertext {
 
-	size := len(ct.Coefficients)
-	plaintextCoeffs := make([]int64, size)
-
-	for i, coeff := range ct.Coefficients {
-
-		gsk := pk.G1.NewFieldElement()
-		csk := pk.G1.NewFieldElement()
-		aux := pk.G1.NewFieldElement()
-		zero := pk.G1.NewFieldElement()
-
-		gsk.PowBig(pk.P, sk.Key)
-		csk.PowBig(coeff, sk.Key)
-
-		if zero.Equals(csk) {
-			plaintextCoeffs[i] = 0
-			continue
-		}
-
-		aux.Set(gsk)
-
-		// brute force compute the discrete log
-		// TODO: use kangaroo!
-		m := big.NewInt(1)
-
-		for {
-			if aux.Equals(csk) {
-				break
-			}
-
-			aux.Mul(aux, gsk)
-			m.Add(m, big.NewInt(1))
-		}
-
-		plaintextCoeffs[i] = m.Int64()
-
-		threshold := big.NewInt(0).Div(pk.T, big.NewInt(2))
-		if m.Cmp(threshold) >= 1 {
-			m.Sub(m, pk.T)
-			plaintextCoeffs[i] = m.Int64()
-		}
+	if ct.L2 {
+		return pk.aInvL2(ct)
 	}
 
-	return &Plaintext{plaintextCoeffs, pk.PolyBase, ct.ScaleFactor}
-}
+	eT := pk.encrypt(pk.T)
+	degree := ct.Degree
+	result := make([]*pbc.Element, degree)
 
-// DecryptL2 a level 2 (multiplied) ciphertext C using secret key sk
-func (sk *SecretKey) DecryptL2(ct *Ciphertext, pk *PublicKey) *Plaintext {
-
-	size := len(ct.Coefficients)
-	plaintextCoeffs := make([]int64, size)
-
-	for i, coeff := range ct.Coefficients {
-
-		gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-		gsk.PowBig(gsk, sk.Key)
-
-		csk := coeff.NewFieldElement()
-		csk.PowBig(coeff, sk.Key)
-
-		aux := gsk.NewFieldElement()
-		aux.Set(gsk)
-
-		zero := pk.Pairing.NewGT().NewFieldElement()
-
-		if zero.Equals(csk) {
-			plaintextCoeffs[i] = 0
-			continue
-		}
-
-		aux.Set(gsk)
-
-		// brute force compute the discrete log
-		// TODO: use kangaroo!
-		m := big.NewInt(1)
-
-		for {
-			if aux.Equals(csk) {
-				break
-			}
-
-			aux.Mul(aux, gsk)
-			m.Add(m, big.NewInt(1))
-		}
-
-		plaintextCoeffs[i] = m.Int64()
-
-		threshold := big.NewInt(0).Div(pk.T, big.NewInt(2))
-		if m.Cmp(threshold) >= 1 {
-			m.Sub(m, pk.T)
-			plaintextCoeffs[i] = m.Int64()
-		}
+	for i := degree - 1; i >= 0; i-- {
+		result[i] = pk.eSubElements(pk.eAddElements(pk.DT, eT), ct.Coefficients[i])
 	}
 
-	return &Plaintext{plaintextCoeffs, pk.PolyBase, ct.ScaleFactor}
+	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
 }
 
 // EAdd adds two level 1 (non-multiplied) ciphertexts together and returns the result
 func (pk *PublicKey) EAdd(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Ciphertext {
 
-	ct1 := ciphertext1
-	ct2 := ciphertext2
-	scaleFactor := ct1.ScaleFactor
-
-	if ct1.ScaleFactor > ct2.ScaleFactor {
-		diff := ct1.ScaleFactor - ct2.ScaleFactor
-		newCoeffs := make([]*pbc.Element, len(ct2.Coefficients)+diff)
-
-		var i int
-		for i = 0; i < len(ct2.Coefficients); i++ {
-			newCoeffs[i] = ct2.Coefficients[i]
+	if ciphertext1.L2 || ciphertext2.L2 {
+		if !ciphertext1.L2 {
+			return pk.eAddL2(pk.makeL2(ciphertext1), ciphertext2)
 		}
 
-		for ; i < len(ct2.Coefficients)+diff; i++ {
-			newCoeffs[i] = pk.encryptZero()
+		if !ciphertext2.L2 {
+			return pk.eAddL2(ciphertext1, pk.makeL2(ciphertext2))
 		}
 
-		ct2.Coefficients = newCoeffs
-
-	} else if ct2.ScaleFactor > ct1.ScaleFactor {
-		// flip the ciphertexts
-		return pk.EAdd(ciphertext2, ciphertext1)
+		return pk.eAddL2(ciphertext1, ciphertext2)
 	}
 
-	degree := int(math.Max(float64(len(ct1.Coefficients)), float64(len(ct2.Coefficients))))
+	ct1 := ciphertext1.Copy()
+	ct2 := ciphertext2.Copy()
+	ct1, ct2 = pk.alignCiphertexts(ct1, ct2, false)
+
+	degree := int(math.Max(float64(ct1.Degree), float64(ct2.Degree)))
+	result := make([]*pbc.Element, degree)
+
+	for i := 0; i < degree; i++ {
+
+		if ct2.Degree > i && ct1.Degree > i {
+			result[i] = pk.eAddElements(ct1.Coefficients[i], ct2.Coefficients[i])
+			continue
+		}
+
+		if i >= ct2.Degree {
+			result[i] = ct1.Coefficients[i]
+		}
+
+		if i >= ct1.Degree {
+			result[i] = ct2.Coefficients[i]
+		}
+	}
+
+	return &Ciphertext{result, degree, ct1.ScaleFactor, ct1.L2}
+}
+
+// Decrypt the given ciphertext
+func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
+
+	if ct.L2 {
+		return sk.decryptL2(ct, pk)
+	}
+
+	size := ct.Degree
+	plaintextCoeffs := make([]int64, size)
+
+	for i := 0; i < ct.Degree; i++ {
+		plaintextCoeffs[i] = sk.decryptElement(ct.Coefficients[i], pk, false)
+	}
+
+	return &Plaintext{plaintextCoeffs, size, pk.PolyBase, ct.ScaleFactor}
+}
+
+func (pk *PublicKey) aInvL2(ct *Ciphertext) *Ciphertext {
+
+	eT := pk.encrypt(pk.T)
+
+	degree := ct.Degree
+	result := make([]*pbc.Element, degree)
+
+	for i := degree - 1; i >= 0; i-- {
+		result[i] = pk.eSubL2Elements(pk.toL2Element(pk.eAddElements(pk.DT, eT)), ct.Coefficients[i])
+	}
+
+	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
+}
+
+func (sk *SecretKey) decryptElement(el *pbc.Element, pk *PublicKey, failed bool) int64 {
+
+	gsk := pk.G1.NewFieldElement()
+	csk := pk.G1.NewFieldElement()
+	gsk.PowBig(pk.P, sk.Key)
+	csk.PowBig(el, sk.Key)
+
+	pt, err := pk.recoverMessageWithDL(gsk, csk)
+	if err != nil {
+		if failed {
+			panic("decryption failed twice. Message not recoverable.")
+		}
+		return sk.decryptElement(pk.eSubElements(el, pk.DT), pk, true)
+	}
+	return pt
+}
+
+func (sk *SecretKey) decryptElementL2(el *pbc.Element, pk *PublicKey, failed bool) int64 {
+
+	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	gsk.PowBig(gsk, sk.Key)
+
+	csk := el.NewFieldElement()
+	csk.PowBig(el, sk.Key)
+
+	pt, err := pk.recoverMessageWithDL(gsk, csk)
+	if err != nil {
+		if failed {
+			panic("decryption failed twice. Message not recoverable.")
+		}
+		return sk.decryptElementL2(pk.eSubL2Elements(el, pk.toL2Element(pk.DT)), pk, true)
+	}
+
+	return pt
+}
+
+// DecryptL2 a level 2 (multiplied) ciphertext C using secret key sk
+func (sk *SecretKey) decryptL2(ct *Ciphertext, pk *PublicKey) *Plaintext {
+
+	size := ct.Degree
+	plaintextCoeffs := make([]int64, size)
+
+	for i := 0; i < ct.Degree; i++ {
+		plaintextCoeffs[i] = sk.decryptElementL2(ct.Coefficients[i], pk, false)
+	}
+
+	return &Plaintext{plaintextCoeffs, ct.Degree, pk.PolyBase, ct.ScaleFactor}
+}
+
+// EAddL2 adds two level 2 (multiplied) ciphertexts together and returns the result
+func (pk *PublicKey) eAddL2(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Ciphertext {
+
+	ct1 := ciphertext1.Copy()
+	ct2 := ciphertext2.Copy()
+	ct1, ct2 = pk.alignCiphertexts(ct1, ct2, true)
+
+	degree := int(math.Max(float64(ct1.Degree), float64(ct2.Degree)))
 	result := make([]*pbc.Element, degree)
 
 	for i := degree - 1; i >= 0; i-- {
 
-		if i >= len(ct2.Coefficients) {
+		if i >= ct2.Degree {
 			result[i] = ct1.Coefficients[i]
 			continue
 		}
 
-		if i >= len(ct1.Coefficients) {
+		if i >= ct1.Degree {
 			result[i] = ct2.Coefficients[i]
 			continue
 		}
 
-		result[i] = pk.eAdd(ct1.Coefficients[i], ct2.Coefficients[i])
+		result[i] = pk.eAddL2Elements(ct1.Coefficients[i], ct2.Coefficients[i])
 	}
 
-	return &Ciphertext{result, scaleFactor}
+	return &Ciphertext{result, degree, ct1.ScaleFactor, ct1.L2}
 }
 
-func (pk *PublicKey) eAdd(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+// EMultC multiplies a level 1 (non-multiplied) ciphertext with a plaintext constant
+// and returns the result
+func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
+
+	if ct.L2 {
+		return pk.eMultCL2(ct, constant)
+	}
+
+	isNegative := constant < 0.0
+	if isNegative {
+		constant *= -1
+	}
+
+	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
+
+	degree := ct.Degree + poly.Degree
+	result := make([]*pbc.Element, degree)
+
+	zero := pk.G1.NewFieldElement()
+
+	// set all coefficients to zero
+	for i := 0; i < degree; i++ {
+		result[i] = zero
+	}
+
+	for i := ct.Degree - 1; i >= 0; i-- {
+		for k := poly.Degree - 1; k >= 0; k-- {
+			index := i + k
+
+			coeff := zero.NewFieldElement()
+			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
+
+			r := newCryptoRandom(pk.N)
+			q := zero.NewFieldElement()
+			q.MulBig(pk.Q, r)
+			coeff.Mul(coeff, q)
+
+			// don't bother adding if the coefficients are zero
+			if result[index].Equals(zero) {
+				result[index] = coeff
+			} else {
+				result[index] = pk.eAddElements(result[index], coeff)
+			}
+		}
+	}
+
+	product := &Ciphertext{result, degree, ct.ScaleFactor + poly.ScaleFactor, ct.L2}
+
+	if isNegative {
+		return pk.AInv(product)
+	}
+
+	return product
+}
+
+// EMultCL2 multiplies a level 2 (multiplied) ciphertext with a plaintext constant
+// and returns the result
+func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
+
+	isNegative := constant < 0.0
+	if isNegative {
+		constant *= -1
+	}
+
+	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
+
+	degree := ct.Degree + poly.Degree
+	result := make([]*pbc.Element, degree)
+
+	zero := pk.Pairing.NewGT().NewFieldElement()
+
+	// set all coefficients to zero
+	for i := 0; i < degree; i++ {
+		result[i] = zero
+	}
+
+	for i := ct.Degree - 1; i >= 0; i-- {
+		for k := poly.Degree - 1; k >= 0; k-- {
+			index := i + k
+
+			coeff := zero.NewFieldElement()
+			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
+
+			r := newCryptoRandom(pk.N)
+
+			pair := zero.Pair(pk.Q, pk.Q)
+			pair.PowBig(pair, r)
+
+			coeff.Mul(coeff, pair)
+
+			result[i] = coeff
+
+			// don't bother adding if the coefficients are zero
+			if result[index].Equals(zero) {
+				result[index] = coeff
+			} else {
+				result[index] = pk.eAddL2Elements(result[index], coeff)
+			}
+		}
+	}
+
+	product := &Ciphertext{result, degree, ct.ScaleFactor + poly.ScaleFactor, ct.L2}
+
+	if isNegative {
+		return pk.AInv(product)
+	}
+
+	return product
+}
+
+// EMult multiplies two level 1 (non-multiplied) ciphertext together and returns the result
+func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
+
+	degree := ct1.Degree + ct2.Degree
+	result := make([]*pbc.Element, degree)
+
+	zero := pk.Pairing.NewGT().NewFieldElement()
+	// encrypt the padding zero coefficients
+	for i := 0; i < degree; i++ {
+		result[i] = zero
+	}
+
+	for i := ct1.Degree - 1; i >= 0; i-- {
+		for k := ct2.Degree - 1; k >= 0; k-- {
+			index := i + k
+			coeff := pk.Pairing.NewGT().NewFieldElement()
+			coeff.Pair(ct1.Coefficients[i], ct2.Coefficients[k])
+
+			r := newCryptoRandom(pk.N)
+			pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+			pair.PowBig(pair, r)
+
+			coeff.Mul(coeff, pair)
+
+			if result[index] != zero {
+				result[index] = pk.eAddL2Elements(result[index], coeff)
+			} else {
+				result[index] = coeff
+			}
+		}
+	}
+
+	return &Ciphertext{result, degree, ct1.ScaleFactor + ct2.ScaleFactor, true}
+}
+
+func (pk *PublicKey) toL2Element(el *pbc.Element) *pbc.Element {
+
+	result := pk.Pairing.NewGT().NewFieldElement()
+	result.Pair(el, pk.encrypt(big.NewInt(1)))
+
+	r := newCryptoRandom(pk.N)
+	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	pair.PowBig(pair, r)
+
+	return result.Mul(result, pair)
+}
+
+func (pk *PublicKey) makeL2(ct *Ciphertext) *Ciphertext {
+
+	one := pk.Encrypt(NewPlaintext(1, pk.PolyBase, pk.FPPrecision))
+	return pk.EMult(one, ct)
+}
+
+func (pk *PublicKey) encrypt(x *big.Int) *pbc.Element {
+
+	r := newCryptoRandom(pk.N)
+
+	G := pk.G1.NewFieldElement()
+	H := pk.G1.NewFieldElement()
+
+	G.PowBig(pk.P, x)
+	H.PowBig(pk.Q, r)
+
+	C := pk.G1.NewFieldElement()
+	return C.Mul(G, H)
+}
+
+func (pk *PublicKey) recoverMessageWithDL(gsk *pbc.Element, csk *pbc.Element) (int64, error) {
+
+	aux := gsk.NewFieldElement()
+	aux.Set(gsk)
+
+	zero := gsk.NewFieldElement()
+
+	if zero.Equals(csk) {
+		return 0, nil
+	}
+
+	aux.Set(gsk)
+
+	// brute force compute the discrete log
+	// TODO: use kangaroo!
+	m := big.NewInt(1)
+
+	for {
+		if aux.Equals(csk) {
+			break
+		}
+
+		aux.Mul(aux, gsk)
+		m.Add(m, big.NewInt(1))
+
+		if m.Cmp(pk.T) >= 1 {
+			return 0, errors.New("out of message space")
+		}
+	}
+
+	threshold := big.NewInt(0).Div(pk.T, big.NewInt(2))
+	if m.Cmp(threshold) >= 1 {
+		m.Sub(m, pk.T)
+	}
+
+	return m.Int64(), nil
+}
+
+func (pk *PublicKey) eSubElements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+
+	result := pk.G1.NewFieldElement()
+	result.Div(coeff1, coeff2)
+
+	rand := newCryptoRandom(pk.N)
+	h1 := pk.G1.NewFieldElement()
+	h1.PowBig(pk.Q, rand)
+
+	return result.Mul(result, h1)
+}
+
+func (pk *PublicKey) eSubL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+
+	result := pk.Pairing.NewGT().NewFieldElement()
+	result.Div(coeff1, coeff2)
+
+	r := newCryptoRandom(pk.N)
+	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+	pair.PowBig(pair, r)
+
+	return result.Mul(result, pair)
+}
+
+func (pk *PublicKey) eAddElements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
 
 	result := pk.G1.NewFieldElement()
 	result.Mul(coeff1, coeff2)
@@ -279,55 +538,7 @@ func (pk *PublicKey) eAdd(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element
 	return result.Mul(result, h1)
 }
 
-// EAddL2 adds two level 2 (multiplied) ciphertexts together and returns the result
-func (pk *PublicKey) EAddL2(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Ciphertext {
-
-	ct1 := ciphertext1
-	ct2 := ciphertext2
-	scaleFactor := ct1.ScaleFactor
-
-	if ct1.ScaleFactor > ct2.ScaleFactor {
-		diff := ct1.ScaleFactor - ct2.ScaleFactor
-		newCoeffs := make([]*pbc.Element, len(ct2.Coefficients)+diff)
-
-		var i int
-		for i = 0; i < len(ct2.Coefficients); i++ {
-			newCoeffs[i] = ct2.Coefficients[i]
-		}
-
-		for ; i < len(ct2.Coefficients)+diff; i++ {
-			newCoeffs[i] = pk.encryptZero()
-		}
-
-		ct2.Coefficients = newCoeffs
-
-	} else if ct2.ScaleFactor > ct1.ScaleFactor {
-		// flip the ciphertexts
-		return pk.EAddL2(ciphertext2, ciphertext1)
-	}
-
-	degree := int(math.Max(float64(len(ct1.Coefficients)), float64(len(ct2.Coefficients))))
-	result := make([]*pbc.Element, degree)
-
-	for i := degree - 1; i >= 0; i-- {
-
-		if i >= len(ct2.Coefficients) {
-			result[i] = ct1.Coefficients[i]
-			continue
-		}
-
-		if i >= len(ct1.Coefficients) {
-			result[i] = ct2.Coefficients[i]
-			continue
-		}
-
-		result[i] = pk.eAddL2(ct1.Coefficients[i], ct2.Coefficients[i])
-	}
-
-	return &Ciphertext{result, scaleFactor}
-}
-
-func (pk *PublicKey) eAddL2(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) eAddL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
 
 	result := pk.Pairing.NewGT().NewFieldElement()
 	result.Mul(coeff1, coeff2)
@@ -339,137 +550,36 @@ func (pk *PublicKey) eAddL2(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Eleme
 	return result.Mul(result, pair)
 }
 
-// EMultC multiplies a level 1 (non-multiplied) ciphertext with a plaintext constant
-// and returns the result
-func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
+func (pk *PublicKey) alignCiphertexts(ct1 *Ciphertext, ct2 *Ciphertext, level2 bool) (*Ciphertext, *Ciphertext) {
 
-	constPoly := NewPlaintext(constant, pk.PolyBase)
-	degree := len(ct.Coefficients) + len(constPoly.Coefficients)
-	result := make([]*pbc.Element, degree)
+	if ct1.ScaleFactor > ct2.ScaleFactor {
+		diff := ct1.ScaleFactor - ct2.ScaleFactor
+		newCoeffs := make([]*pbc.Element, ct2.Degree+diff)
 
-	zero := pk.G1.NewFieldElement()
-	for i := 0; i < degree; i++ {
-		result[i] = zero
-	}
-
-	for i := 0; i < len(ct.Coefficients); i++ {
-		index := i
-		for k := 0; k < len(constPoly.Coefficients); k++ {
-
-			coeff := pk.G1.NewFieldElement()
-			coeff.MulBig(ct.Coefficients[i], big.NewInt(constPoly.Coefficients[k]))
-
-			r := newCryptoRandom(pk.N)
-			q := pk.G1.NewFieldElement()
-			q.MulBig(pk.Q, r)
-			coeff.Mul(coeff, q)
-
-			if !result[index].Equals(zero) {
-				result[index] = pk.eAdd(result[index], coeff)
+		i := 0
+		for ; i < diff; i++ {
+			if level2 {
+				newCoeffs[i] = pk.encryptZeroL2()
 			} else {
-				result[index] = coeff
+				newCoeffs[i] = pk.encryptZero()
 			}
-
-			index++
 		}
-	}
 
-	// encrypt the padding zero coefficients
-	for i := 0; i < degree; i++ {
-		if result[i].Equals(zero) {
-			result[i] = pk.encryptZero()
+		for ; i < ct2.Degree+diff; i++ {
+			newCoeffs[i] = ct2.Coefficients[i-diff]
+
 		}
+
+		ct2.Degree += diff
+		ct2.Coefficients = newCoeffs
+		ct2.ScaleFactor = ct1.ScaleFactor
+
+	} else if ct2.ScaleFactor > ct1.ScaleFactor {
+		// flip the ciphertexts
+		return pk.alignCiphertexts(ct2, ct1, level2)
 	}
 
-	return &Ciphertext{result, ct.ScaleFactor + constPoly.ScaleFactor}
-}
-
-// EMultCL2 multiplies a level 2 (multiplied) ciphertext with a plaintext constant
-// and returns the result
-func (pk *PublicKey) EMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
-
-	constPoly := NewPlaintext(constant, pk.PolyBase)
-	degree := len(ct.Coefficients) + len(constPoly.Coefficients)
-	result := make([]*pbc.Element, degree)
-
-	zero := pk.Pairing.NewGT().NewFieldElement()
-	for i := 0; i < degree; i++ {
-		result[i] = zero
-	}
-
-	for i := 0; i < len(ct.Coefficients); i++ {
-		index := i
-		for k := 0; k < len(constPoly.Coefficients); k++ {
-
-			coeff := pk.Pairing.NewGT().NewFieldElement()
-			coeff.MulBig(ct.Coefficients[i], big.NewInt(constPoly.Coefficients[k]))
-			r := newCryptoRandom(pk.N)
-			pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
-			pair.PowBig(pair, r)
-			coeff.Mul(coeff, pair)
-
-			if !result[index].Equals(zero) {
-				result[index] = pk.eAddL2(result[index], coeff)
-			} else {
-				result[index] = coeff
-			}
-
-			index++
-		}
-	}
-
-	// encrypt the padding zero coefficients
-	for i := 0; i < degree; i++ {
-		if result[i].Equals(zero) {
-			result[i] = pk.encryptZeroL2()
-		}
-	}
-
-	return &Ciphertext{result, ct.ScaleFactor + constPoly.ScaleFactor}
-}
-
-// EMult multiplies two level 1 (non-multiplied) ciphertext together and returns the result
-func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
-
-	degree := len(ct1.Coefficients) + len(ct2.Coefficients)
-	result := make([]*pbc.Element, degree)
-
-	zero := pk.Pairing.NewGT().NewFieldElement()
-	for i := 0; i < degree; i++ {
-		result[i] = zero
-	}
-
-	for i := 0; i < len(ct1.Coefficients); i++ {
-		index := i
-		for k := 0; k < len(ct2.Coefficients); k++ {
-
-			coeff := pk.Pairing.NewGT().NewFieldElement()
-			coeff.Pair(ct1.Coefficients[i], ct2.Coefficients[k])
-
-			r := newCryptoRandom(pk.N)
-			pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
-			pair.PowBig(pair, r)
-
-			coeff.Mul(coeff, pair)
-
-			if !result[index].Equals(zero) {
-				result[index] = pk.eAddL2(result[index], coeff)
-			} else {
-				result[index] = coeff
-			}
-
-			index++
-		}
-	}
-
-	// encrypt the padding zero coefficients
-	for i := 0; i < degree; i++ {
-		if result[i].Equals(zero) {
-			result[i] = pk.encryptZeroL2()
-		}
-	}
-
-	return &Ciphertext{result, ct1.ScaleFactor + ct2.ScaleFactor}
+	return ct1, ct2
 }
 
 func (pk *PublicKey) encryptZero() *pbc.Element {
@@ -520,7 +630,7 @@ func newCryptoRandom(max *big.Int) *big.Int {
 // would be to either compute l on the fly or figure
 // out the memory mapping between the C struct and
 // golang equivalent
-func parseLFromParams(params *pbc.Params) (*big.Int, error) {
+func parseLFromPBCParams(params *pbc.Params) (*big.Int, error) {
 
 	paramsStr := params.String()
 	lStr := paramsStr[strings.Index(paramsStr, "l")+2 : len(paramsStr)-1]
@@ -536,7 +646,7 @@ func (c *Ciphertext) String() string {
 
 	str := ""
 	for _, coeff := range c.Coefficients {
-		str += coeff.X().String() + "\n"
+		str += coeff.String() + "\n"
 	}
 
 	return str

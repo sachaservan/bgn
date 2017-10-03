@@ -3,130 +3,297 @@ package main
 import (
 	"bgn"
 	"fmt"
-	"math/big"
+	"math"
 )
 
 func main() {
-	printWelcome()
+	//printWelcome()
 
-	println("\n***Begin Executing Demo****")
+	println("\n***Begin Executing Demo****\n")
 
-	fmt.Println(big.NewRat(0, 1).SetFloat64(0.0112).FloatString(8))
-
-	keyBits := 16 // length of q1 and q2
+	keyBits := 32 // length of q1 and q2
 	polyBase := 3
-	fpPrecision := 8
+	fpPrecision := 10
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
-
-	m1 := bgn.NewPlaintext(5.519197, pk.PolyBase)
-	m2 := bgn.NewPlaintext(1.121212, pk.PolyBase)
-	m3 := bgn.NewPlaintext(10, pk.PolyBase)
-	m4 := bgn.NewPlaintext(15.11111, pk.PolyBase)
-
-	fmt.Println("m1 = " + m1.String())
-	fmt.Println("m2 = " + m2.String())
-	fmt.Println("m3 = " + m3.String())
-	fmt.Println("m4 = " + m4.String())
-
-	c1 := pk.Encrypt(m1)
-	c2 := pk.Encrypt(m2)
-	c3 := pk.Encrypt(m3)
-	c4 := pk.Encrypt(m4)
-
-	r1 := pk.EAdd(c1, c2)
-	fmt.Printf("Result of EADD %s + %s = %s\n", m1, m2, sk.Decrypt(r1, pk).String())
-
-	r2 := pk.EMultC(c2, 10)
-	fmt.Printf("Result of EMULTC %s * 10 = %s\n", m2, sk.Decrypt(r2, pk).String())
-
-	r3 := pk.EMult(c3, c4)
-	dr3 := sk.DecryptL2(r3, pk)
-	fmt.Printf("Result of EMULT %s * %s = %s\n", m3, m4, sk.DecryptL2(r3, pk).String())
-
-	r4 := pk.EMultCL2(r3, 4.444444)
-	fmt.Printf("Result of EMULTCL2 %s * 4.444444 = %s\n", dr3.String(), sk.DecryptL2(r4, pk).String())
-
-	r5 := pk.EAddL2(r3, r3)
-	fmt.Printf("Result of EADDL2 %s + %s = %s\n", dr3.String(), dr3.String(), sk.DecryptL2(r5, pk).String())
+	//runSanityCheck(keyBits, polyBase, fpPrecision)
+	//exampleArithmetic(keyBits, polyBase, fpPrecision)
+	exampleTTestSimulation(10, keyBits, polyBase, fpPrecision)
+	//exampleMultiParty(20, keyBits, polyBase, fpPrecision)
 
 	println("\n***End Executing Demo****\n")
 
 }
 
-// func exampleMultiParty(bits int, numParties int) {
+func exampleMultiParty(numParties int, keyBits int, polyBase int, fpPrecision int) {
 
-// 	println("\n***Multi-party decryption****\n")
+	pk, shares, _ := bgn.NewMPCKeyGen(numParties, keyBits, polyBase, fpPrecision)
 
-// 	pk, shares, _ := bgn.NewMPKeyGen(bits, numParties)
+	m1 := bgn.NewPlaintext(4.12313123, pk.PolyBase, pk.FPPrecision)
+	m2 := bgn.NewPlaintext(5.12121212, pk.PolyBase, pk.FPPrecision)
+	c1 := pk.Encrypt(m1)
+	c2 := pk.Encrypt(m2)
+	c3 := pk.EAdd(c1, c2)
+	c4 := pk.EMult(c1, c2)
 
-// 	m1 := bgn.NewPlaintextInt(big.NewInt(24))
-// 	m2 := bgn.NewPlaintextInt(big.NewInt(23))
-// 	fmt.Println("\nP1 is: " + m1.String())
-// 	fmt.Println("\nP2 is: " + m2.String())
+	partialDecryptions := []*bgn.PartialDecrypt{}
+	for _, share := range shares {
+		partial := share.PartialDecrypt(c3, pk)
+		partialDecryptions = append(partialDecryptions, partial)
+	}
 
-// 	c1 := pk.Encrypt(m1)
-// 	c2 := pk.Encrypt(m2)
-// 	c3 := pk.EAdd(c1, c2)
-// 	c4 := pk.EMult(c1, c2)
+	resultAdd := bgn.CombinedShares(partialDecryptions, pk)
 
-// 	fmt.Println("\n[LEVEL 1] E(P1) is: " + c1.String())
-// 	fmt.Println("\n[LEVEL 1] E(P2) is: " + c2.String())
+	partialDecryptions = []*bgn.PartialDecrypt{}
+	for _, share := range shares {
+		partial := share.PartialDecrypt(c4, pk)
+		partialDecryptions = append(partialDecryptions, partial)
+	}
 
-// 	partialDecryptions := []*bgn.PartialDecrypt{}
+	resultMult := bgn.CombinedShares(partialDecryptions, pk)
 
-// 	for index, share := range shares {
-// 		partial := share.PartialDecrypt(c3, pk)
-// 		partialDecryptions = append(partialDecryptions, partial)
-// 		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + partial.Csk.String())
-// 	}
+	fmt.Printf("MPCEADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultAdd.String())
+	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultMult.String())
+}
 
-// 	resultAdd := bgn.CombinedShares(partialDecryptions, pk)
+func exampleTTestSimulation(numParties int, keyBits int, polyBase int, fpPrecision int) {
 
-// 	partialDecryptions = []*bgn.PartialDecrypt{}
-// 	for index, share := range shares {
-// 		partial := share.PartialDecrypt2(c4, pk)
-// 		partialDecryptions = append(partialDecryptions, partial)
-// 		fmt.Println("\nPartial decryption from party #" + strconv.Itoa(index) + " is: " + partial.Csk.String())
-// 	}
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
 
-// 	resultMult := bgn.CombinedShares(partialDecryptions, pk)
+	// START DEALER CODE
+	var placebo = []float64{105.0, 119.0, 100.0, 97.0, 96.0, 101.0, 94.0, 95.0, 98.0}
+	var placebo2 = []float64{105.0, 119.0, 100.0, 97.0, 96.0, 101.0, 94.0, 95.0, 98.0}
 
-// 	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") + [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 1] E(" + resultAdd.String() + ")\n")
-// 	fmt.Println("\nMulti-party result of [LEVEL 1] E(" + m1.String() + ") * [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 2] E(" + resultMult.String() + ")\n")
+	var caffeine = []float64{96.0, 99.0, 94.0, 89.0, 96.0, 93.0, 88.0, 105.0, 88.0}
+	var caffeine2 = []float64{96, 99, 94, 89, 96, 93, 88, 105, 88}
 
-// }
+	numRows := len(caffeine)
 
-// func exampleClassic(bits int) {
+	for i := 0; i < numRows; i++ {
+		placebo2[i] = placebo[i] * placebo[i]
+		caffeine2[i] = caffeine[i] * caffeine[i]
+	}
 
-// 	pk, sk, _ := bgn.NewKeyGen(bits)
-// 	m1 := bgn.NewPlaintextInt(big.NewInt(25))
-// 	m2 := bgn.NewPlaintextInt(big.NewInt(7))
-// 	constant := big.NewInt(10)
+	var ePlacebo []*bgn.Ciphertext
+	ePlacebo = make([]*bgn.Ciphertext, numRows)
+	var eCaffeine []*bgn.Ciphertext
+	eCaffeine = make([]*bgn.Ciphertext, numRows)
 
-// 	fmt.Println("\nP1 is: " + m1.String())
-// 	fmt.Println("\nP2 is: " + m2.String())
+	// encrypted squared values
+	var ePlacebo2 []*bgn.Ciphertext
+	ePlacebo2 = make([]*bgn.Ciphertext, numRows)
+	var eCaffeine2 []*bgn.Ciphertext
+	eCaffeine2 = make([]*bgn.Ciphertext, numRows)
 
-// 	c1 := pk.Encrypt(m1)
-// 	c2 := pk.Encrypt(m2)
+	sumPlaceboActual := 0.0
+	sumCaffeineActual := 0.0
+	for i := 0; i < numRows; i++ {
 
-// 	fmt.Println("\n[LEVEL 1] E(P1) is: " + c1.String())
-// 	fmt.Println("\n[LEVEL 2] E(P2) is: " + c2.String())
+		sumPlaceboActual += placebo[i]
+		sumCaffeineActual += caffeine[i]
 
-// 	c3 := pk.EAdd(c1, c2)
-// 	c4 := pk.EMultC(c1, constant)
-// 	c5 := pk.EMult(c1, c2)
-// 	c6 := pk.EAdd2(c5, c5)
-// 	c7 := pk.EMultC2(c5, constant)
+		plaintextPlacebo := bgn.NewPlaintext(placebo[i], polyBase, pk.FPPrecision)
+		plaintextCaffeine := bgn.NewPlaintext(caffeine[i], polyBase, pk.FPPrecision)
 
-// 	fmt.Println("\nResult of " + "[LEVEL 1] E(" + m1.String() + ") + [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 1] E(" + sk.Decrypt(c3, pk).String() + ")")
-// 	fmt.Println("\nResult of " + "[LEVEL 1] E(" + m1.String() + ") * " + constant.String() + " is: [LEVEL 1] E(" + sk.Decrypt(c4, pk).String() + ")")
+		plaintextCaffeine2 := bgn.NewPlaintext(caffeine2[i], polyBase, pk.FPPrecision)
+		plaintextPlacebo2 := bgn.NewPlaintext(placebo2[i], polyBase, pk.FPPrecision)
 
-// 	plaintextMult := sk.Decrypt2(c5, pk)
-// 	fmt.Println("\nResult of " + "[LEVEL 1] E(" + m1.String() + ") * [LEVEL 1] E(" + m2.String() + ") is: [LEVEL 2] E(" + plaintextMult.String() + ")")
-// 	fmt.Println("\nResult of " + "[LEVEL 2] E(" + plaintextMult.String() + ") + " + "[LEVEL 2] E(" + plaintextMult.String() + ") is: [LEVEL 2] E(" + sk.Decrypt2(c6, pk).String() + ")")
-// 	fmt.Println("\nResult of " + "[LEVEL 2] E(" + plaintextMult.String() + ") * " + constant.String() + " is: [LEVEL 2] E(" + sk.Decrypt2(c7, pk).String() + ")")
-// }
+		ePlacebo[i] = pk.Encrypt(plaintextPlacebo)
+		eCaffeine[i] = pk.Encrypt(plaintextCaffeine)
+
+		ePlacebo2[i] = pk.Encrypt(plaintextPlacebo2)
+		eCaffeine2[i] = pk.Encrypt(plaintextCaffeine2)
+	}
+
+	// **********************************
+	// END DEALER CODE
+	// START CLIENT CODE
+	// **********************************
+
+	invNumRows := 1.0 / float64(numRows)
+	sumPlacebo := ePlacebo[0]
+	sumCaffeine := eCaffeine[0]
+
+	// sum of the squares
+	sumPlacebo2 := ePlacebo2[0]
+	sumCaffeine2 := eCaffeine2[0]
+
+	for i := 1; i < numRows; i++ {
+		sumPlacebo = pk.EAdd(sumPlacebo, ePlacebo[i])
+		sumCaffeine = pk.EAdd(sumCaffeine, eCaffeine[i])
+		sumPlacebo2 = pk.EAdd(sumPlacebo2, ePlacebo2[i])
+		sumCaffeine2 = pk.EAdd(sumCaffeine2, eCaffeine2[i])
+	}
+
+	meanPlacebo := pk.EMultC(sumPlacebo, invNumRows)
+	meanCaffeine := pk.EMultC(sumCaffeine, invNumRows)
+
+	// sanity check
+	fmt.Printf("MEAN PLACEBO: %s, sum=%s\n", sk.Decrypt(meanPlacebo, pk).String(), sk.Decrypt(sumPlacebo, pk).String())
+	fmt.Printf("MEAN CAFFEINE: %s, sum=%s\n", sk.Decrypt(meanCaffeine, pk).String(), sk.Decrypt(sumCaffeine, pk).String())
+
+	// encryption of 1 to take ciphertext to G2 for  ops
+	e1 := pk.Encrypt(bgn.NewPlaintext(1.0, pk.PolyBase, pk.FPPrecision))
+	e0 := pk.Encrypt(bgn.NewPlaintext(0.0, pk.PolyBase, pk.FPPrecision))
+
+	ssPlacebo := pk.EMult(e1, e0)
+	ssCaffeine := pk.EMult(e1, e0)
+	for i := 0; i < numRows; i++ {
+
+		smp := pk.EAdd(ePlacebo[i], pk.AInv(meanPlacebo))
+		ssPlacebo = pk.EAdd(ssPlacebo, pk.EMult(smp, smp))
+
+		smc := pk.EAdd(eCaffeine[i], pk.AInv(meanCaffeine))
+		ssCaffeine = pk.EAdd(ssCaffeine, pk.EMult(smc, smc))
+	}
+
+	fmt.Printf("SS PLACEBO: %s\n", sk.Decrypt(ssPlacebo, pk).PolyEval().String())
+	fmt.Printf("SS CAFFEINE: %s\n", sk.Decrypt(ssCaffeine, pk).PolyEval().String())
+
+	ssPlacebo = pk.EMultC(ssPlacebo, invNumRows)
+	ssCaffeine = pk.EMultC(ssCaffeine, invNumRows)
+
+	// sanity check
+	sdPlaceboFloat, _ := sk.Decrypt(ssPlacebo, pk).PolyEval().Float64()
+	sdCaffeineFloat, _ := sk.Decrypt(ssCaffeine, pk).PolyEval().Float64()
+
+	fmt.Printf("SD PLACEBO: %f\n", math.Sqrt(sdPlaceboFloat))
+	fmt.Printf("SD CAFFEINE: %f\n", math.Sqrt(sdCaffeineFloat))
+
+	top := pk.EAdd(meanPlacebo, pk.AInv(meanCaffeine))
+	top = pk.EMult(top, top)
+
+	ta := pk.EAdd(pk.EMult(e1, sumPlacebo2), pk.AInv(pk.EMultC(pk.EMult(sumPlacebo, sumPlacebo), invNumRows)))
+	tb := pk.EAdd(pk.EMult(e1, sumCaffeine2), pk.AInv(pk.EMultC(pk.EMult(sumCaffeine, sumCaffeine), invNumRows)))
+
+	bottom := pk.EAdd(ta, tb)
+
+	fmt.Printf("b1: %s\n", sk.Decrypt(bottom, pk).String())
+
+	bottom = pk.EMultC(bottom, 1.0/(float64(numRows+numRows-2)))
+	fmt.Printf("b2: %s\n", sk.Decrypt(bottom, pk).String())
+
+	bottom = pk.EMultC(bottom, 2.0/float64(numRows))
+
+	fmt.Printf("b3: %s, %f\n", sk.Decrypt(bottom, pk).String(), 1.0/(float64(numRows+numRows-2)))
+
+	numerator, _ := sk.Decrypt(top, pk).PolyEval().Float64()
+	denominator, _ := sk.Decrypt(bottom, pk).PolyEval().Float64()
+	// sanity check
+	fmt.Printf("numerator: %f, denominator: %f\n", numerator, denominator)
+
+	tstatistic := math.Sqrt(numerator / math.Abs(denominator))
+
+	fmt.Printf("T statistic %f\n", tstatistic)
+}
+
+func exampleArithmetic(keyBits int, polyBase int, fpPrecision int) {
+
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
+
+	m1 := bgn.NewPlaintext(9.5, pk.PolyBase, pk.FPPrecision)
+	m2 := bgn.NewPlaintext(904, pk.PolyBase, pk.FPPrecision)
+	m3 := bgn.NewPlaintext(2.75, pk.PolyBase, pk.FPPrecision)
+	m4 := bgn.NewPlaintext(32.99, pk.PolyBase, pk.FPPrecision)
+	m5 := bgn.NewPlaintext(-6.99, pk.PolyBase, pk.FPPrecision)
+
+	c1 := pk.Encrypt(m1)
+	c2 := pk.Encrypt(m2)
+	c3 := pk.Encrypt(m3)
+	c4 := pk.Encrypt(m4)
+	c5 := pk.Encrypt(m5)
+	c6 := pk.AInv(c4)
+
+	r1 := pk.EAdd(c1, c2)
+	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m2, sk.Decrypt(r1, pk).String())
+
+	const1 := 0.1111
+	r2 := pk.EMultC(c2, const1)
+	fmt.Printf("EMULTC E(%s) ⊠ %f = E(%s)\n\n", m2, const1, sk.Decrypt(r2, pk).String())
+
+	r3 := pk.EMult(c3, c4)
+	dr3 := sk.Decrypt(r3, pk)
+	fmt.Printf("EMULT E(%s) ⊠ E(%s) = E(%s)\n\n", m3, m4, sk.Decrypt(r3, pk).String())
+
+	const2 := -3.5
+	r4 := pk.EMultC(r3, const2)
+	dr4 := sk.Decrypt(r4, pk)
+	fmt.Printf("EMULTC E(%s) ⊠ %f = E(%s)\n\n", dr3.String(), const2, dr4.String())
+
+	r5 := pk.EAdd(r3, r3)
+	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", dr3.String(), dr3.String(), sk.Decrypt(r5, pk).String())
+
+	r6 := pk.EAdd(c1, c6)
+	fmt.Printf("EADD E(%s) ⊞ AINV(E(%s)) = E(%s)\n\n", m1, m4, sk.Decrypt(r6, pk).String())
+
+	r7 := pk.AInv(pk.EMult(c5, c5))
+	dr7 := sk.Decrypt(r7, pk)
+	mpcMultRes := runMPCEMultSimulation(pk, sk, r7, r3)
+	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s) = E(%s)\n\n", dr7.String(), dr3.String(), sk.Decrypt(mpcMultRes, pk).String())
+
+}
+
+func runMPCEMultSimulation(pk *bgn.PublicKey, sk *bgn.SecretKey, ct1 *bgn.Ciphertext, ct2 *bgn.Ciphertext) *bgn.Ciphertext {
+
+	var result *bgn.MPCEMultReceptacle
+
+	// simulate 10 parties
+	for i := 0; i < 10; i++ {
+		req := bgn.NewMPCEmultRequest(ct2)
+		res := pk.RequestMPCMultiplication(req)
+
+		if result == nil {
+			result = &bgn.MPCEMultReceptacle{TermA: res.PartialTermA, TermBA: res.PartialTermBA}
+		} else {
+			result.TermA = pk.EAdd(result.TermA, res.PartialTermA)
+			result.TermBA = pk.EAdd(result.TermBA, res.PartialTermBA)
+		}
+	}
+
+	partial := pk.EAdd(ct1, pk.AInv(result.TermA))
+	term1 := sk.Decrypt(partial, pk)
+	fmt.Println("MPC decryption of (ct1-a) = " + term1.String())
+
+	term1Float, _ := term1.PolyEval().Float64()
+	if term1Float < 0 {
+		term1Float *= -1.0
+		return pk.AInv(pk.EAdd(pk.EMultC(ct2, term1Float), pk.AInv(result.TermBA)))
+	}
+
+	return pk.EAdd(pk.EMultC(ct2, term1Float), result.TermBA)
+}
+
+func runSanityCheck(keyBits int, polyBase int, fpPrecision int) {
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
+
+	zero := pk.Encrypt(bgn.NewPlaintext(0, pk.PolyBase, pk.FPPrecision))
+	one := pk.Encrypt(bgn.NewPlaintext(1, pk.PolyBase, pk.FPPrecision))
+
+	fmt.Println("*****RUNNING SANITY CHECK*******")
+	fmt.Println("0+0 = " + sk.Decrypt(pk.EAdd(zero, zero), pk).String())
+	fmt.Println("0+1 = " + sk.Decrypt(pk.EAdd(zero, one), pk).String())
+	fmt.Println("1+1 = " + sk.Decrypt(pk.EAdd(one, one), pk).String())
+	fmt.Println("1+0 = " + sk.Decrypt(pk.EAdd(one, zero), pk).String())
+
+	fmt.Println("0*0 = " + sk.Decrypt(pk.EMult(zero, zero), pk).String())
+	fmt.Println("0*1 = " + sk.Decrypt(pk.EMult(zero, one), pk).String())
+	fmt.Println("1*0 = " + sk.Decrypt(pk.EMult(one, zero), pk).String())
+	fmt.Println("1*1 = " + sk.Decrypt(pk.EMult(one, one), pk).String())
+
+	fmt.Println("0-0 = " + sk.Decrypt(pk.EAdd(zero, pk.AInv(zero)), pk).String())
+	fmt.Println("0-1 = " + sk.Decrypt(pk.EAdd(zero, pk.AInv(one)), pk).String())
+	fmt.Println("1-1 = " + sk.Decrypt(pk.EAdd(one, pk.AInv(one)), pk).String())
+	fmt.Println("1-0 = " + sk.Decrypt(pk.EAdd(one, pk.AInv(zero)), pk).String())
+
+	fmt.Println("0*(-0) = " + sk.Decrypt(pk.EMult(zero, pk.AInv(zero)), pk).String())
+	fmt.Println("0*(-1) = " + sk.Decrypt(pk.EMult(zero, pk.AInv(one)), pk).String())
+	fmt.Println("1*-(0) = " + sk.Decrypt(pk.EMult(one, pk.AInv(zero)), pk).String())
+	fmt.Println("1*-(1) = " + sk.Decrypt(pk.EMult(one, pk.AInv(one)), pk).String())
+	fmt.Println("(-1)*-(1) = " + sk.Decrypt(pk.EMult(pk.AInv(one), pk.AInv(one)), pk).String())
+	fmt.Println("AINV((-1)*(-1)) = " + sk.Decrypt(pk.AInv(pk.EMult(pk.AInv(one), pk.AInv(one))), pk).String())
+
+	fmt.Println("*****DONE WITH SANITY CHECK*******")
+
+}
 
 func printWelcome() {
 	fmt.Println("BBBBBBBBBBBBBBBBB           GGGGGGGGGGGGGNNNNNNNN        NNNNNNNN")
@@ -145,7 +312,5 @@ func printWelcome() {
 	fmt.Println("B:::::::::::::::::B    GG:::::::::::::::GN::::::N       N:::::::N")
 	fmt.Println("B::::::::::::::::B       GGG::::::GGG:::GN::::::N        N::::::N")
 	fmt.Println("BBBBBBBBBBBBBBBBB           GGGGGG   GGGGNNNNNNNN         NNNNNNN")
-	fmt.Println("-----------------------------------------------------------------")
-	fmt.Println("  Test implementation of the Boneh Goh Nissim crypto system.")
 	fmt.Println("-----------------------------------------------------------------")
 }

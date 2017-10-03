@@ -1,5 +1,8 @@
 all: build
 
+run:
+	go build -o example main/*.go
+	./example
 build: 
 	go build -o example main/*.go
 clean: 

@@ -1,6 +1,7 @@
 package bgn
 
 import (
+	"math"
 	"math/big"
 
 	"github.com/Nik-U/pbc"
@@ -11,105 +12,158 @@ type SecretKeyShare struct {
 	Share *big.Int
 }
 
+// multiply ct1*ct2 together in MPC
+// Party 0 send everyone E(ct2)
+// Party i generate/compute a_i, E(a_i) and E(ct2 a_i). Send E(a_i) and E(b a_i) to Party 0
+// Party 0 computes E(ct1) – E(a), where E(a) is the sum of E(a_i)’s.
+// All decrypt E(ct1-a)
+// Party 0 computes E(ct2)*(ct1-a) + E(ct2*a) from E(ct2*a_i) it got in step 2.
+
+type MPCEMultRequest struct {
+	Ct *Ciphertext
+}
+
+type MPCEMultResponse struct {
+	PartialTermA  *Ciphertext // E(a_i)
+	PartialTermBA *Ciphertext // E(b*a_i)
+}
+
+type MPCEMultReceptacle struct {
+	TermA  *Ciphertext
+	TermBA *Ciphertext
+}
+
 type PartialDecrypt struct {
-	Csk         *pbc.Element
-	Gsk         *pbc.Element
+	Csks        []*pbc.Element
+	Gsks        []*pbc.Element
+	Degree      int
 	ScaleFactor int
 }
 
-// func (sk *SecretKeyShare) PartialDecrypt(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
+func NewMPCEmultRequest(ct *Ciphertext) *MPCEMultRequest {
+	return &MPCEMultRequest{ct}
+}
 
-// 	csk := pk.G1.NewFieldElement()
-// 	gsk := pk.G1.NewFieldElement()
+func (pk *PublicKey) RequestMPCMultiplication(request *MPCEMultRequest) *MPCEMultResponse {
 
-// 	csk.PowBig(ct.C, sk.Share)
-// 	gsk.PowBig(pk.P, sk.Share)
+	termA := math.Floor(math.Sqrt(float64(newCryptoRandom(big.NewInt(100)).Int64())))
+	if newCryptoRandom(big.NewInt(1)).Cmp(big.NewInt(0)) == 0 {
+		termA *= -1
+	}
 
-// 	return &PartialDecrypt{csk, gsk, ct.Denominator, ct.IsRat}
-// }
+	termAPoly := NewPlaintext(termA, pk.PolyBase, pk.FPPrecision)
+	termAEnc := pk.Encrypt(termAPoly)
 
-// func (sk *SecretKeyShare) PartialDecrypt2(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
+	return &MPCEMultResponse{termAEnc, pk.EMultC(request.Ct, termA)}
+}
 
-// 	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-// 	gsk.PowBig(gsk, sk.Share)
+func (sk *SecretKeyShare) PartialDecrypt(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
 
-// 	csk := ct.C.NewFieldElement()
-// 	csk.PowBig(ct.C, sk.Share)
+	csks := make([]*pbc.Element, ct.Degree)
+	gsks := make([]*pbc.Element, ct.Degree)
 
-// 	return &PartialDecrypt{csk, gsk, ct.Denominator, ct.IsRat}
-// }
+	for i, coeff := range ct.Coefficients {
 
-// func CombinedShares(shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
+		gsk := pk.G1.NewFieldElement()
+		csk := pk.G1.NewFieldElement()
+		gsks[i] = gsk.PowBig(pk.P, sk.Share)
+		csks[i] = csk.PowBig(coeff, sk.Share)
+	}
 
-// 	csk := shares[0].Csk.NewFieldElement()
-// 	gsk := shares[0].Gsk.NewFieldElement()
+	return &PartialDecrypt{csks, gsks, ct.Degree, ct.ScaleFactor}
+}
 
-// 	csk.Set(shares[0].Csk)
-// 	gsk.Set(shares[0].Gsk)
+func (sk *SecretKeyShare) PartialDecryptL2(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
 
-// 	for index, share := range shares {
-// 		if index == 0 {
-// 			continue
-// 		}
+	csks := make([]*pbc.Element, ct.Degree)
+	gsks := make([]*pbc.Element, ct.Degree)
 
-// 		csk.Mul(csk, share.Csk)
-// 		gsk.Mul(gsk, share.Gsk)
-// 	}
+	for i, coeff := range ct.Coefficients {
 
-// 	denominator := shares[0].Denominator
-// 	isRat := shares[0].IsRat
+		gsks[i] = pk.Pairing.NewGT().Pair(pk.P, pk.P)
+		gsks[i].PowBig(gsks[i], sk.Share)
 
-// 	aux := gsk.NewFieldElement()
-// 	aux.Set(gsk)
+		csk := pk.Pairing.NewGT().NewFieldElement()
+		csks[i] = csk.PowBig(coeff, sk.Share)
+	}
 
-// 	// brute force compute the discrete log
-// 	// TODO: use kangaroo!
-// 	m := big.NewInt(1)
+	return &PartialDecrypt{csks, gsks, ct.Degree, ct.ScaleFactor}
+}
 
-// 	for {
-// 		if aux.Equals(csk) {
-// 			break
-// 		}
+func CombinedShares(shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
 
-// 		aux = aux.Mul(aux, gsk)
-// 		m = m.Add(m, big.NewInt(1))
-// 	}
+	if len(shares) < 1 {
+		panic("Number of shares to combine must be >= 1")
+	}
 
-// 	return &Plaintext{m, denominator, isRat}
-// }
+	size := shares[0].Degree // assume all partial decrypts will have same number of coeffs
+	csks := make([]*pbc.Element, size)
+	gsks := make([]*pbc.Element, size)
 
-// // NewMPKeyGen generates a new public key and n shares of a secret key
-// func NewMPKeyGen(bits int, n int) (*PublicKey, []*SecretKeyShare, error) {
+	for i := 0; i < size; i++ {
+		csks[i] = shares[0].Csks[i].NewFieldElement()
+		gsks[i] = shares[0].Csks[i].NewFieldElement()
+		csks[i].Set(shares[0].Csks[i])
+		gsks[i].Set(shares[0].Gsks[i])
+	}
 
-// 	// generate standard key pair
-// 	var sk *SecretKey
-// 	pk, sk, err := NewKeyGen(bits)
+	for index, share := range shares {
 
-// 	if err != nil {
-// 		return nil, nil, err
-// 	}
+		if index == 0 {
+			continue
+		}
 
-// 	// secret key shares
-// 	var shares []*SecretKeyShare
+		for i := 0; i < share.Degree; i++ {
+			csks[i].Mul(csks[i], share.Csks[i])
+			gsks[i].Mul(gsks[i], share.Gsks[i])
+		}
+	}
 
-// 	// max value of each share (no bigger than sk/n)
-// 	max := big.NewInt(0).Div(sk.Key, big.NewInt(int64(n)))
+	plaintextCoeffs := make([]int64, size)
+	for i := 0; i < size; i++ {
+		pt, err := pk.recoverMessageWithDL(gsks[i], csks[i])
+		if err != nil {
+			panic("not handled!")
+		}
+		plaintextCoeffs[i] = pt
+	}
 
-// 	// sum of all the shares
-// 	sum := big.NewInt(0)
+	return &Plaintext{plaintextCoeffs, size, pk.PolyBase, shares[0].ScaleFactor}
 
-// 	// compute shares
-// 	for i := 0; i < n-1; i++ {
-// 		// create new random share
-// 		next := newCryptoRandom(max)
-// 		shares = append(shares, &SecretKeyShare{next})
-// 		sum.Add(sum, next)
-// 	}
+}
 
-// 	// last share should be computed so as to
-// 	// have all shares add up to sk
-// 	last := sum.Sub(sk.Key, sum)
-// 	shares = append(shares, &SecretKeyShare{last})
+// NewMPCKeyGen generates a new public key and n shares of a secret key
+func NewMPCKeyGen(numShares int, keyBits int, polyBase int, fpPrecision int) (*PublicKey, []*SecretKeyShare, error) {
 
-// 	return pk, shares, err
-// }
+	// generate standard key pair
+	var sk *SecretKey
+	pk, sk, err := NewKeyGen(keyBits, polyBase, fpPrecision)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// secret key shares
+	var shares []*SecretKeyShare
+
+	// max value of each share (no bigger than sk/n)
+	max := big.NewInt(0).Div(sk.Key, big.NewInt(int64(numShares)))
+
+	// sum of all the shares
+	sum := big.NewInt(0)
+
+	// compute shares
+	for i := 0; i < numShares-1; i++ {
+		// create new random share
+		next := newCryptoRandom(max)
+		shares = append(shares, &SecretKeyShare{next})
+		sum.Add(sum, next)
+	}
+
+	// last share should be computed so as to
+	// have all shares add up to sk
+	last := sum.Sub(sk.Key, sum)
+	shares = append(shares, &SecretKeyShare{last})
+
+	return pk, shares, err
+}

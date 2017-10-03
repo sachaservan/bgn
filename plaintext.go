@@ -4,48 +4,64 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-
-	"github.com/mjibson/go-dsp/fft"
 )
 
 var degreeSumTable []int64
 var degreeTable []int64
 var computedBase int
 
+const degreeBound = 64 // note: 3^64 > Int64 hence this is a generous upper bound
+
+// Plaintext struct holds data related to the polynomial encoded plaintext
 type Plaintext struct {
 	Coefficients []int64 // coefficients in the plaintext or ciphertext poly
+	Degree       int
 	Base         int
 	ScaleFactor  int
 }
 
-func NewPlaintext(m float64, b int) *Plaintext {
+// NewUnbalancedPlaintext generates an unbalanced base b encoded polynomial representation of m
+// fpp is the starting floating point scale factor which determines the precision
+func NewUnbalancedPlaintext(m float64, b int, fpp int) *Plaintext {
 
 	if degreeTable == nil || computedBase != b {
 		computedBase = b
-		degreeTable, degreeSumTable = computeDegreeTable(b, 64)
+		degreeTable, degreeSumTable = computeDegreeTable(b, degreeBound)
 	}
 
-	if math.Remainder(m, 1) != 0 {
-		// m is a rational number
-		numerator, scaleFactor := rationalize(m, float64(b), 10)
-		res := float64(numerator) / math.Pow(float64(b), float64(scaleFactor))
-		fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, res)
-		coeffs := encode(numerator, b, degreeTable, degreeSumTable)
-		return &Plaintext{coeffs, b, scaleFactor}
+	// m is a rational number, encode it rationally
+	if math.Remainder(m, 1.0) != 0.0 {
+		numerator, scaleFactor := rationalize(m, b, fpp)
+		// fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, float64(numerator)/math.Pow(float64(b), float64(scaleFactor)))
+		coeffs, degree := unbalancedEncode(numerator, b, degreeTable, degreeSumTable)
+		return &Plaintext{coeffs, degree, b, scaleFactor}
 	}
 
-	// m is an int
-	points := encode(int64(m), b, degreeTable, degreeSumTable)
-	return &Plaintext{points, b, 0}
+	//m is an int
+	coeffs, degree := unbalancedEncode(int64(m), b, degreeTable, degreeSumTable)
+	return &Plaintext{coeffs, degree, b, 0}
 }
 
-func pointForm(coeffs []int64) []complex128 {
+// NewPlaintext generates an balanced base b encoded polynomial representation of m
+// fpp is the starting floating point scale factor which determines the precision
+func NewPlaintext(m float64, b int, fpp int) *Plaintext {
 
-	input := make([]complex128, len(coeffs))
-	for i, coeff := range coeffs {
-		input[i] = complex(float64(coeff), 0)
+	if degreeTable == nil || computedBase != b {
+		computedBase = b
+		degreeTable, degreeSumTable = computeDegreeTable(b, degreeBound)
 	}
-	return fft.FFT(input)
+
+	// m is a rational number, encode it rationally
+	if math.Remainder(m, 1.0) != 0.0 {
+		numerator, scaleFactor := rationalize(m, b, fpp)
+		// fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, float64(numerator)/math.Pow(float64(b), float64(scaleFactor)))
+		coeffs, degree := balancedEncode(numerator, b, degreeTable, degreeSumTable)
+		return &Plaintext{coeffs, degree, b, scaleFactor}
+	}
+
+	//m is an int
+	coeffs, degree := balancedEncode(int64(m), b, degreeTable, degreeSumTable)
+	return &Plaintext{coeffs, degree, b, 0}
 }
 
 func computeDegreeTable(base int, bound int) ([]int64, []int64) {
@@ -67,36 +83,105 @@ func computeDegreeTable(base int, bound int) ([]int64, []int64) {
 	return degreeTable, degreeSumTable
 }
 
-func degree(target int64, sums []int64, bound int) int {
+// compute the closest degree to the target value
+func degree(target int64, sums []int64, bound int, balanced bool) int {
 
 	if target == 1 {
 		return 0
 	}
 
-	for i := 1; i <= bound; i++ {
+	if balanced {
 
-		if sums[i] >= target {
-			return i
+		for i := 1; i <= bound; i++ {
+			if degreeSumTable[i] >= target {
+				return i
+			}
+		}
+
+	} else {
+		for i := 1; i <= bound; i++ {
+			if degreeTable[i] > target {
+				return i - 1
+			}
 		}
 	}
 
 	return -1
 }
 
-func encode(target int64, base int, degrees []int64, sumDegrees []int64) []int64 {
+func unbalancedEncode(target int64, base int, degrees []int64, sumDegrees []int64) ([]int64, int) {
+
+	// special case
+	if target == 0 {
+		coefficients := make([]int64, 1)
+		coefficients[0] = 0
+		return coefficients, 1
+	}
+
+	if target < 0 {
+		panic("Negative encoding not supported")
+	}
 
 	if sumDegrees == nil {
 		panic("No precomputed degree table!")
 	}
 
-	coefficients := make([]int64, 64)
+	coefficients := make([]int64, degreeBound)
 	bound := len(sumDegrees)
-	lastIndex := 64
+	lastDegree := degreeBound
+
+	for {
+
+		index := degree(target, sumDegrees, lastDegree, false)
+		lastDegree = index + 1
+
+		if bound == len(sumDegrees) {
+			bound = index + 1
+		}
+
+		value := degrees[index]
+
+		if 2*value <= target {
+			value *= 2
+			coefficients[index] = 2
+		} else {
+			coefficients[index] = 1
+		}
+
+		if value == target {
+			return coefficients[:bound+1], bound + 1
+		}
+
+		target = target - value
+	}
+}
+
+func balancedEncode(target int64, base int, degrees []int64, sumDegrees []int64) ([]int64, int) {
+
+	// special case
+	if target == 0 {
+		coefficients := make([]int64, 1)
+		coefficients[0] = 0
+		return coefficients, 1
+	}
+
+	isNegative := target < 0
+	if isNegative {
+		target *= -1
+	}
+
+	if sumDegrees == nil {
+		panic("No precomputed degree table!")
+	}
+
+	coefficients := make([]int64, degreeBound)
+	bound := len(sumDegrees)
+	lastIndex := degreeBound
 	nextNegative := false
 
 	for {
 
-		index := degree(target, sumDegrees, lastIndex)
+		index := degree(target, sumDegrees, lastIndex, true)
 		lastIndex = index
 
 		if bound == len(sumDegrees) {
@@ -110,7 +195,15 @@ func encode(target int64, base int, degrees []int64, sumDegrees []int64) []int64
 		}
 
 		if degrees[index] == target {
-			return coefficients[:bound+1]
+
+			// make the poly negative
+			if isNegative {
+				for i := 0; i <= bound; i++ {
+					coefficients[i] *= -1
+				}
+			}
+
+			return coefficients[:bound+1], bound + 1
 		}
 
 		if target < degrees[index] {
@@ -122,30 +215,40 @@ func encode(target int64, base int, degrees []int64, sumDegrees []int64) []int64
 	}
 }
 
-func rationalize(x float64, base float64, pow float64) (int64, int) {
+func reverse(numbers []int64) []int64 {
+	for i := 0; i < len(numbers)/2; i++ {
+		j := len(numbers) - i - 1
+		numbers[i], numbers[j] = numbers[j], numbers[i]
+	}
+	return numbers
+}
+
+// rationalize float x as a base b encoded polynomial and a scalefactor
+func rationalize(x float64, base int, precision int) (int64, int) {
 
 	factor := math.Floor(x)
-	if x < 1 && x > -1 {
-		factor = 1
-	}
 
 	x = 1.0 + math.Remainder(x, 1.0)
-	if x >= 1.0 {
+	if math.Abs(x) > 1.0 {
+		x += 1.0
+	}
+
+	if x >= 0.0 {
 		x -= float64(int(x))
-	} else if x <= -1 {
+	} else if x <= -0.0 {
 		x += float64(int(x))
 	}
 
 	num := float64(1)
+	pow := float64(precision)
 
-	err := 1.0 / (math.Pow(base, pow) * 2)
+	err := 1.0 / (math.Pow(float64(base), pow+1))
 	qmin := x - err
 	qmax := x + err
 
 	for {
 		// TODO: make more elegant, brute force right now...
-
-		denom := math.Pow(base, pow)
+		denom := math.Pow(float64(base), pow)
 		rat := num / denom
 		if rat <= qmax && rat >= qmin {
 			return int64(factor*denom + num), int(pow)
@@ -160,12 +263,13 @@ func rationalize(x float64, base float64, pow float64) (int64, int) {
 	}
 }
 
-func (p *Plaintext) polyEval() *big.Float {
+// PolyEval evaluates a given polynomial using Horner's method
+func (p *Plaintext) PolyEval() *big.Float {
 
 	acc := big.NewFloat(0)
 	x := big.NewFloat(float64(p.Base))
 
-	for i := len(p.Coefficients) - 1; i >= 0; i -= 1 {
+	for i := p.Degree - 1; i >= 0; i-- {
 		acc.Mul(acc, x)
 		acc.Add(acc, big.NewFloat(float64(p.Coefficients[i])))
 	}
@@ -182,17 +286,16 @@ func (p *Plaintext) polyEval() *big.Float {
 func (p *Plaintext) String() string {
 
 	// s := ""
-	// for i := len(p.Coefficients) - 1; i >= 0; i-- {
-	// 	if p.Coefficients[i] == 0 {
-	// 		continue
-	// 	}
+	// for i := 0; i < p.Degree; i++ {
 
 	// 	s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
 
-	// 	if i > 0 {
+	// 	if i < p.Degree-1 {
 	// 		s += " + "
 	// 	}
 	// }
 
-	return fmt.Sprintf("%s", p.polyEval().String())
+	// return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
+
+	return fmt.Sprintf("%s", p.PolyEval().String())
 }
