@@ -15,16 +15,16 @@ import (
 // PublicKey is the BGN public key used for encryption
 // as well as performing homomorphic operations on ciphertexts
 type PublicKey struct {
-	Pairing     *pbc.Pairing // pairing between G1 and G2
-	G1          *pbc.Element // G1 group
-	P           *pbc.Element // generator of G1
-	Q           *pbc.Element
-	N           *big.Int     // product of two primes
-	T           *big.Int     // message space T
-	DT          *pbc.Element // encrypted q2-T
-	Sk          *big.Int     // REMOVE! TODO: GET RID OF THIS
-	PolyBase    int
-	FPPrecision int
+	Pairing       *pbc.Pairing // pairing between G1 and G2
+	G1            *pbc.Element // G1 group
+	P             *pbc.Element // generator of G1
+	Q             *pbc.Element
+	N             *big.Int     // product of two primes
+	T             *big.Int     // message space T
+	DT            *pbc.Element // encrypted q2-T
+	PolyBase      int
+	FPPrecision   int
+	Deterministic bool // whether or not the homomorphic operations are deterministic
 }
 
 // SecretKey used for decryption of ciphertexts
@@ -34,7 +34,7 @@ type SecretKey struct {
 }
 
 // NewKeyGen creates a new public/private key pair of size bits
-func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretKey, error) {
+func NewKeyGen(keyBits int, polyBase int, fpPrecision int, deterministic bool) (*PublicKey, *SecretKey, error) {
 
 	if keyBits < 16 {
 		panic("key bits must be >= 16 bits in length")
@@ -87,10 +87,9 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int) (*PublicKey, *SecretK
 	Q.PowBig(Q, q2)
 
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, P, Q, N, T, nil, q2, polyBase, fpPrecision}
+	pk := &PublicKey{pairing, G1, P, Q, N, T, nil, polyBase, fpPrecision, deterministic}
 
-	s := big.NewInt(0).Sub(q2, T)
-	DT := pk.encrypt(s)
+	DT := pk.encrypt(big.NewInt(0).Sub(q2, T), true) // note: no point making this non-deterministic
 	pk.DT = DT
 
 	// create secret key
@@ -110,10 +109,10 @@ func (pk *PublicKey) Encrypt(pt *Plaintext) *Ciphertext {
 		if negative {
 			positive := -1 * pt.Coefficients[i]
 			coeff := big.NewInt(positive)
-			encryptedCoefficients[i] = pk.eSubElements(pk.encryptZero(), pk.encrypt(coeff))
+			encryptedCoefficients[i] = pk.eSubElements(pk.encryptZero(), pk.encrypt(coeff, false), pk.Deterministic)
 		} else {
 			coeff := big.NewInt(pt.Coefficients[i])
-			encryptedCoefficients[i] = pk.encrypt(coeff)
+			encryptedCoefficients[i] = pk.encrypt(coeff, false)
 		}
 	}
 
@@ -127,12 +126,12 @@ func (pk *PublicKey) AInv(ct *Ciphertext) *Ciphertext {
 		return pk.aInvL2(ct)
 	}
 
-	eT := pk.encrypt(pk.T)
+	eT := pk.encrypt(pk.T, pk.Deterministic)
 	degree := ct.Degree
 	result := make([]*pbc.Element, degree)
 
 	for i := degree - 1; i >= 0; i-- {
-		result[i] = pk.eSubElements(pk.eAddElements(pk.DT, eT), ct.Coefficients[i])
+		result[i] = pk.eSubElements(pk.eAddElements(pk.DT, eT, pk.Deterministic), ct.Coefficients[i], pk.Deterministic)
 	}
 
 	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
@@ -163,7 +162,7 @@ func (pk *PublicKey) EAdd(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Cip
 	for i := 0; i < degree; i++ {
 
 		if ct2.Degree > i && ct1.Degree > i {
-			result[i] = pk.eAddElements(ct1.Coefficients[i], ct2.Coefficients[i])
+			result[i] = pk.eAddElements(ct1.Coefficients[i], ct2.Coefficients[i], pk.Deterministic)
 			continue
 		}
 
@@ -198,13 +197,13 @@ func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 
 func (pk *PublicKey) aInvL2(ct *Ciphertext) *Ciphertext {
 
-	eT := pk.encrypt(pk.T)
+	eT := pk.encrypt(pk.T, pk.Deterministic)
 
 	degree := ct.Degree
 	result := make([]*pbc.Element, degree)
 
 	for i := degree - 1; i >= 0; i-- {
-		result[i] = pk.eSubL2Elements(pk.toL2Element(pk.eAddElements(pk.DT, eT)), ct.Coefficients[i])
+		result[i] = pk.eSubL2Elements(pk.toL2Element(pk.eAddElements(pk.DT, eT, pk.Deterministic), pk.Deterministic), ct.Coefficients[i], pk.Deterministic)
 	}
 
 	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
@@ -222,7 +221,7 @@ func (sk *SecretKey) decryptElement(el *pbc.Element, pk *PublicKey, failed bool)
 		if failed {
 			panic("decryption failed twice. Message not recoverable.")
 		}
-		return sk.decryptElement(pk.eSubElements(el, pk.DT), pk, true)
+		return sk.decryptElement(pk.eSubElements(el, pk.DT, pk.Deterministic), pk, pk.Deterministic)
 	}
 	return pt
 }
@@ -240,7 +239,9 @@ func (sk *SecretKey) decryptElementL2(el *pbc.Element, pk *PublicKey, failed boo
 		if failed {
 			panic("decryption failed twice. Message not recoverable.")
 		}
-		return sk.decryptElementL2(pk.eSubL2Elements(el, pk.toL2Element(pk.DT)), pk, true)
+		return sk.decryptElementL2(
+			pk.eSubL2Elements(el,
+				pk.toL2Element(pk.DT, pk.Deterministic), pk.Deterministic), pk, pk.Deterministic)
 	}
 
 	return pt
@@ -264,7 +265,7 @@ func (pk *PublicKey) eAddL2(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *C
 
 	ct1 := ciphertext1.Copy()
 	ct2 := ciphertext2.Copy()
-	ct1, ct2 = pk.alignCiphertexts(ct1, ct2, true)
+	ct1, ct2 = pk.alignCiphertexts(ct1, ct2, pk.Deterministic)
 
 	degree := int(math.Max(float64(ct1.Degree), float64(ct2.Degree)))
 	result := make([]*pbc.Element, degree)
@@ -281,7 +282,7 @@ func (pk *PublicKey) eAddL2(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *C
 			continue
 		}
 
-		result[i] = pk.eAddL2Elements(ct1.Coefficients[i], ct2.Coefficients[i])
+		result[i] = pk.eAddL2Elements(ct1.Coefficients[i], ct2.Coefficients[i], pk.Deterministic)
 	}
 
 	return &Ciphertext{result, degree, ct1.ScaleFactor, ct1.L2}
@@ -319,17 +320,14 @@ func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
 			coeff := zero.NewFieldElement()
 			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
 
-			r := newCryptoRandom(pk.N)
-			q := zero.NewFieldElement()
-			q.MulBig(pk.Q, r)
-			coeff.Mul(coeff, q)
-
-			// don't bother adding if the coefficients are zero
-			if result[index].Equals(zero) {
-				result[index] = coeff
-			} else {
-				result[index] = pk.eAddElements(result[index], coeff)
+			if !pk.Deterministic {
+				r := newCryptoRandom(pk.N)
+				q := zero.NewFieldElement()
+				q.MulBig(pk.Q, r)
+				coeff.Mul(coeff, q)
 			}
+
+			result[index] = pk.eAddElements(result[index], coeff, pk.Deterministic)
 		}
 	}
 
@@ -356,35 +354,26 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
 
-	zero := pk.Pairing.NewGT().NewFieldElement()
-
 	// set all coefficients to zero
 	for i := 0; i < degree; i++ {
-		result[i] = zero
+		result[i] = pk.Pairing.NewGT().NewFieldElement()
 	}
 
 	for i := ct.Degree - 1; i >= 0; i-- {
 		for k := poly.Degree - 1; k >= 0; k-- {
 			index := i + k
 
-			coeff := zero.NewFieldElement()
+			coeff := pk.Pairing.NewGT().NewFieldElement()
 			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
 
-			r := newCryptoRandom(pk.N)
-
-			pair := zero.Pair(pk.Q, pk.Q)
-			pair.PowBig(pair, r)
-
-			coeff.Mul(coeff, pair)
-
-			result[i] = coeff
-
-			// don't bother adding if the coefficients are zero
-			if result[index].Equals(zero) {
-				result[index] = coeff
-			} else {
-				result[index] = pk.eAddL2Elements(result[index], coeff)
+			if !pk.Deterministic {
+				r := newCryptoRandom(pk.N)
+				pair := pk.Pairing.NewGT().NewFieldElement().Pair(pk.Q, pk.Q)
+				pair.PowBig(pair, r)
+				coeff.Mul(coeff, pair)
 			}
+
+			result[index] = pk.eAddL2Elements(result[index], coeff, pk.Deterministic)
 		}
 	}
 
@@ -421,8 +410,8 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 
 			coeff.Mul(coeff, pair)
 
-			if result[index] != zero {
-				result[index] = pk.eAddL2Elements(result[index], coeff)
+			if result[index].Equals(zero) {
+				result[index] = pk.eAddL2Elements(result[index], coeff, pk.Deterministic)
 			} else {
 				result[index] = coeff
 			}
@@ -432,10 +421,14 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 	return &Ciphertext{result, degree, ct1.ScaleFactor + ct2.ScaleFactor, true}
 }
 
-func (pk *PublicKey) toL2Element(el *pbc.Element) *pbc.Element {
+func (pk *PublicKey) toL2Element(el *pbc.Element, deterministic bool) *pbc.Element {
 
 	result := pk.Pairing.NewGT().NewFieldElement()
-	result.Pair(el, pk.encrypt(big.NewInt(1)))
+	result.Pair(el, pk.encrypt(big.NewInt(1), pk.Deterministic))
+
+	if deterministic {
+		return result // don't hide with randomness
+	}
 
 	r := newCryptoRandom(pk.N)
 	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
@@ -450,14 +443,17 @@ func (pk *PublicKey) makeL2(ct *Ciphertext) *Ciphertext {
 	return pk.EMult(one, ct)
 }
 
-func (pk *PublicKey) encrypt(x *big.Int) *pbc.Element {
-
-	r := newCryptoRandom(pk.N)
+func (pk *PublicKey) encrypt(x *big.Int, deterministic bool) *pbc.Element {
 
 	G := pk.G1.NewFieldElement()
-	H := pk.G1.NewFieldElement()
-
 	G.PowBig(pk.P, x)
+
+	if deterministic {
+		return G
+	}
+
+	r := newCryptoRandom(pk.N)
+	H := pk.G1.NewFieldElement()
 	H.PowBig(pk.Q, r)
 
 	C := pk.G1.NewFieldElement()
@@ -502,34 +498,44 @@ func (pk *PublicKey) recoverMessageWithDL(gsk *pbc.Element, csk *pbc.Element) (i
 	return m.Int64(), nil
 }
 
-func (pk *PublicKey) eSubElements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) eSubElements(coeff1 *pbc.Element, coeff2 *pbc.Element, deterministic bool) *pbc.Element {
 
 	result := pk.G1.NewFieldElement()
 	result.Div(coeff1, coeff2)
+	if deterministic {
+		return result // don't blind with randomness
+	}
 
 	rand := newCryptoRandom(pk.N)
 	h1 := pk.G1.NewFieldElement()
 	h1.PowBig(pk.Q, rand)
-
 	return result.Mul(result, h1)
 }
 
-func (pk *PublicKey) eSubL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) eSubL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element, deterministic bool) *pbc.Element {
 
 	result := pk.Pairing.NewGT().NewFieldElement()
 	result.Div(coeff1, coeff2)
 
+	if deterministic {
+		return result // don't hide with randomness
+	}
+
 	r := newCryptoRandom(pk.N)
+
 	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
 	pair.PowBig(pair, r)
-
 	return result.Mul(result, pair)
 }
 
-func (pk *PublicKey) eAddElements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) eAddElements(coeff1 *pbc.Element, coeff2 *pbc.Element, deterministic bool) *pbc.Element {
 
 	result := pk.G1.NewFieldElement()
 	result.Mul(coeff1, coeff2)
+
+	if deterministic {
+		return result // don't hide with randomness
+	}
 
 	rand := newCryptoRandom(pk.N)
 	h1 := pk.G1.NewFieldElement()
@@ -538,10 +544,14 @@ func (pk *PublicKey) eAddElements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc
 	return result.Mul(result, h1)
 }
 
-func (pk *PublicKey) eAddL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element) *pbc.Element {
+func (pk *PublicKey) eAddL2Elements(coeff1 *pbc.Element, coeff2 *pbc.Element, deterministic bool) *pbc.Element {
 
 	result := pk.Pairing.NewGT().NewFieldElement()
 	result.Mul(coeff1, coeff2)
+
+	if deterministic {
+		return result // don't hide with randomness
+	}
 
 	r := newCryptoRandom(pk.N)
 	pair := pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
@@ -583,18 +593,7 @@ func (pk *PublicKey) alignCiphertexts(ct1 *Ciphertext, ct2 *Ciphertext, level2 b
 }
 
 func (pk *PublicKey) encryptZero() *pbc.Element {
-	r := newCryptoRandom(pk.N)
-
-	G := pk.G1.NewFieldElement()
-	H := pk.G1.NewFieldElement()
-
-	G.PowBig(pk.P, big.NewInt(0))
-	H.PowBig(pk.Q, r)
-
-	C := pk.G1.NewFieldElement()
-	C.Mul(G, H)
-
-	return C
+	return pk.encrypt(big.NewInt(0), pk.Deterministic)
 }
 
 func (pk *PublicKey) encryptZeroL2() *pbc.Element {

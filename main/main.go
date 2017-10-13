@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	//printWelcome()
+	printWelcome()
 
 	println("\n***Begin Executing Demo****\n")
 
@@ -15,10 +15,10 @@ func main() {
 	polyBase := 3
 	fpPrecision := 10
 
-	//runSanityCheck(keyBits, polyBase, fpPrecision)
-	//exampleArithmetic(keyBits, polyBase, fpPrecision)
-	exampleTTestSimulation(10, keyBits, polyBase, fpPrecision)
-	//exampleMultiParty(20, keyBits, polyBase, fpPrecision)
+	//	runSanityCheck(keyBits, polyBase, fpPrecision)
+	// exampleArithmetic(keyBits, polyBase, fpPrecision)
+	//exampleTTestSimulation(10, keyBits, polyBase, fpPrecision)
+	exampleMultiParty(10, keyBits, polyBase, fpPrecision)
 
 	println("\n***End Executing Demo****\n")
 
@@ -26,38 +26,35 @@ func main() {
 
 func exampleMultiParty(numParties int, keyBits int, polyBase int, fpPrecision int) {
 
-	pk, shares, _ := bgn.NewMPCKeyGen(numParties, keyBits, polyBase, fpPrecision)
+	pk, sk, shares, _ := bgn.NewMPCKeyGen(numParties, keyBits, polyBase, fpPrecision, true)
+	blackboxMPC := bgn.NewBlackboxMPC(shares, pk, sk)
 
-	m1 := bgn.NewPlaintext(4.12313123, pk.PolyBase, pk.FPPrecision)
-	m2 := bgn.NewPlaintext(5.12121212, pk.PolyBase, pk.FPPrecision)
+	m1 := bgn.NewPlaintext(10, pk.PolyBase, pk.FPPrecision)
+	m2 := bgn.NewPlaintext(-3, pk.PolyBase, pk.FPPrecision)
 	c1 := pk.Encrypt(m1)
 	c2 := pk.Encrypt(m2)
 	c3 := pk.EAdd(c1, c2)
 	c4 := pk.EMult(c1, c2)
 
-	partialDecryptions := []*bgn.PartialDecrypt{}
-	for _, share := range shares {
-		partial := share.PartialDecrypt(c3, pk)
-		partialDecryptions = append(partialDecryptions, partial)
-	}
+	resultAdd := blackboxMPC.MPCDecrypt(c3)
+	resultMult := blackboxMPC.MPCDecrypt(c4)
+	c5 := blackboxMPC.MPCEmult(c4, c4)
+	c5 = pk.EMultC(c5, -1.0)
+	resultMult2 := sk.Decrypt(c5, pk)
 
-	resultAdd := bgn.CombinedShares(partialDecryptions, pk)
+	c6 := blackboxMPC.MPCEmult(c5, c5)
+	resultMult3 := sk.Decrypt(c6, pk)
 
-	partialDecryptions = []*bgn.PartialDecrypt{}
-	for _, share := range shares {
-		partial := share.PartialDecrypt(c4, pk)
-		partialDecryptions = append(partialDecryptions, partial)
-	}
+	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultAdd.String())
+	fmt.Printf("EMULT E(%s) ⊠ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultMult.String())
+	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s*(-1)) = E(%s)\n\n", resultMult.String(), resultMult.String(), resultMult2.String())
+	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s) = E(%s)\n\n", resultMult2.String(), resultMult2.String(), resultMult3.String())
 
-	resultMult := bgn.CombinedShares(partialDecryptions, pk)
-
-	fmt.Printf("MPCEADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultAdd.String())
-	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultMult.String())
 }
 
 func exampleTTestSimulation(numParties int, keyBits int, polyBase int, fpPrecision int) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision, true)
 
 	// START DEALER CODE
 	var placebo = []float64{105.0, 119.0, 100.0, 97.0, 96.0, 101.0, 94.0, 95.0, 98.0}
@@ -188,10 +185,10 @@ func exampleTTestSimulation(numParties int, keyBits int, polyBase int, fpPrecisi
 
 func exampleArithmetic(keyBits int, polyBase int, fpPrecision int) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision, true)
 
-	m1 := bgn.NewPlaintext(9.5, pk.PolyBase, pk.FPPrecision)
-	m2 := bgn.NewPlaintext(904, pk.PolyBase, pk.FPPrecision)
+	m1 := bgn.NewPlaintext(1, pk.PolyBase, pk.FPPrecision)
+	m2 := bgn.NewPlaintext(10, pk.PolyBase, pk.FPPrecision)
 	m3 := bgn.NewPlaintext(2.75, pk.PolyBase, pk.FPPrecision)
 	m4 := bgn.NewPlaintext(32.99, pk.PolyBase, pk.FPPrecision)
 	m5 := bgn.NewPlaintext(-6.99, pk.PolyBase, pk.FPPrecision)
@@ -206,8 +203,8 @@ func exampleArithmetic(keyBits int, polyBase int, fpPrecision int) {
 	r1 := pk.EAdd(c1, c2)
 	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m2, sk.Decrypt(r1, pk).String())
 
-	const1 := 0.1111
-	r2 := pk.EMultC(c2, const1)
+	const1 := 8863.0
+	r2 := pk.EMultC(pk.EMult(c2, c1), const1)
 	fmt.Printf("EMULTC E(%s) ⊠ %f = E(%s)\n\n", m2, const1, sk.Decrypt(r2, pk).String())
 
 	r3 := pk.EMult(c3, c4)
@@ -263,10 +260,11 @@ func runMPCEMultSimulation(pk *bgn.PublicKey, sk *bgn.SecretKey, ct1 *bgn.Cipher
 }
 
 func runSanityCheck(keyBits int, polyBase int, fpPrecision int) {
-	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, polyBase, fpPrecision, true)
 
 	zero := pk.Encrypt(bgn.NewPlaintext(0, pk.PolyBase, pk.FPPrecision))
 	one := pk.Encrypt(bgn.NewPlaintext(1, pk.PolyBase, pk.FPPrecision))
+	negone := pk.Encrypt(bgn.NewPlaintext(-1, pk.PolyBase, pk.FPPrecision))
 
 	fmt.Println("*****RUNNING SANITY CHECK*******")
 	fmt.Println("0+0 = " + sk.Decrypt(pk.EAdd(zero, zero), pk).String())
@@ -281,6 +279,7 @@ func runSanityCheck(keyBits int, polyBase int, fpPrecision int) {
 
 	fmt.Println("0-0 = " + sk.Decrypt(pk.EAdd(zero, pk.AInv(zero)), pk).String())
 	fmt.Println("0-1 = " + sk.Decrypt(pk.EAdd(zero, pk.AInv(one)), pk).String())
+	fmt.Println("0 + (-1) = " + sk.Decrypt(pk.EAdd(zero, negone), pk).String())
 	fmt.Println("1-1 = " + sk.Decrypt(pk.EAdd(one, pk.AInv(one)), pk).String())
 	fmt.Println("1-0 = " + sk.Decrypt(pk.EAdd(one, pk.AInv(zero)), pk).String())
 
