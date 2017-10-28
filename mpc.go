@@ -2,7 +2,6 @@ package bgn
 
 import (
 	"fmt"
-	"math"
 	"math/big"
 
 	"github.com/Nik-U/pbc"
@@ -24,8 +23,8 @@ type SecretKeyShare struct {
 // Party 0 send everyone E(ct2)
 // Party i generate/compute a_i, E(a_i) and E(ct2 a_i). Send E(a_i) and E(b a_i) to Party 0
 // Party 0 computes E(ct1) – E(a), where E(a) is the sum of E(a_i)’s.
-// All decrypt E(ct1-a)
-// Party 0 computes E(ct2)*(ct1+a) - E(ct2*a) from E(ct2*a_i) it got in step 2.
+// All decrypt E(ct1-a) 1/b/r * 1/r
+// Party 0 computes E(ct2)*(ct1-a) + E(ct2*a) from E(ct2*a_i) it got in step 2.
 
 type MPCEMultRequest struct {
 	Ct *Ciphertext
@@ -71,7 +70,7 @@ func (bb *BlackBoxMPC) MPCDecrypt(ct *Ciphertext) *Plaintext {
 		}
 	}
 
-	result := bb.combinedShares(ct, partialDecryptions, bb.Pk)
+	result := bb.combineShares(ct, partialDecryptions, bb.Pk)
 	return result
 }
 
@@ -94,8 +93,6 @@ func (bb *BlackBoxMPC) MPCEmult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 	partial := bb.Pk.EAdd(ct1, bb.Pk.AInv(result.TermA))
 	term1 := bb.MPCDecrypt(partial)
 
-	fmt.Printf("MPC decryption of (ct1-%s) = %s\n", bb.Sk.Decrypt(result.TermA, bb.Pk).String(), term1.String())
-
 	term1Float, _ := term1.PolyEval().Float64()
 
 	if term1Float < 0 {
@@ -106,15 +103,50 @@ func (bb *BlackBoxMPC) MPCEmult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 	return bb.Pk.EAdd(bb.Pk.EMultC(ct2, term1Float), result.TermBA)
 }
 
+func (bb *BlackBoxMPC) MPCEMInv(ct *Ciphertext) *Ciphertext {
+
+	var result *MPCEMultReceptacle
+
+	for i := 0; i < bb.NumParties; i++ {
+		req := NewMPCEmultRequest(ct)
+		res := bb.Pk.RequestMPCMultiplication(req)
+
+		if result == nil {
+			result = &MPCEMultReceptacle{TermA: res.PartialTermA, TermBA: res.PartialTermBA}
+		} else {
+			result.TermA = bb.Pk.EAdd(result.TermA, res.PartialTermA)
+			result.TermBA = bb.Pk.EAdd(result.TermBA, res.PartialTermBA)
+		}
+	}
+
+	res, _ := bb.Sk.Decrypt(result.TermBA, bb.Pk).PolyEval().Float64()
+	inverse := bb.Pk.EMultC(result.TermA, 1.0/res)
+
+	return inverse
+}
+
 func (pk *PublicKey) RequestMPCMultiplication(request *MPCEMultRequest) *MPCEMultResponse {
 
-	// TODO: remove constant rand factor here?
-	termA := math.Floor(float64(newCryptoRandom(big.NewInt(10000)).Int64()))
+	// [TODO][v2]: find a meaningful constant
+	arbitraryConstant1 := int64(100)
+	arbitraryConstant2 := int64(10)
 
-	termAPoly := NewPlaintext(termA, pk.PolyBase, pk.FPPrecision)
-	termAEnc := pk.Encrypt(termAPoly)
+	// [TODO][v2]: find a better random factor
+	seed := float64(newCryptoRandom(pk.T).Int64())
+	randomPoly := NewPlaintext(seed, pk.PolyBase, pk.FPPrecision)
+	randomPoly.ScaleFactor = int(newCryptoRandom(big.NewInt(arbitraryConstant1)).Int64())
 
-	return &MPCEMultResponse{termAEnc, pk.EMultC(request.Ct, termA)}
+	// [TODO][v2]: match the number of coefficients to be equal to the other ciphertext?
+	for i := 0; i < len(randomPoly.Coefficients); i++ {
+		randomPoly.Coefficients[i] = randomPoly.Coefficients[i] + newCryptoRandom(big.NewInt(arbitraryConstant2)).Int64()
+	}
+
+	randomFloat, _ := randomPoly.PolyEval().Float64()
+	termAEnc := pk.Encrypt(randomPoly)
+
+	fmt.Println("[DEBUG] Random polynomial evaluates to " + randomPoly.PolyEval().String())
+
+	return &MPCEMultResponse{termAEnc, pk.EMultC(request.Ct, randomFloat)}
 }
 
 func (sk *SecretKeyShare) partialDecrypt(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
@@ -134,7 +166,7 @@ func (sk *SecretKeyShare) partialDecrypt(ct *Ciphertext, pk *PublicKey) *Partial
 		csks[i] = csk.PowBig(coeff, sk.Share)
 
 		cskNegative := pk.G1.NewFieldElement()
-		csksNegative[i] = cskNegative.PowBig(pk.eSubElements(coeff, pk.DT, true), sk.Share)
+		csksNegative[i] = cskNegative.PowBig(pk.eSubElements(coeff, pk.DT), sk.Share)
 	}
 
 	return &PartialDecrypt{csks, csksNegative, gsk, ct.Degree, ct.ScaleFactor}
@@ -154,13 +186,13 @@ func (sk *SecretKeyShare) partialDecryptL2(ct *Ciphertext, pk *PublicKey) *Parti
 		csks[i] = csk.PowBig(coeff, sk.Share)
 
 		cskNegative := pk.Pairing.NewGT().NewFieldElement()
-		csksNegative[i] = cskNegative.PowBig(pk.eSubL2Elements(coeff, pk.toL2Element(pk.DT, true), true), sk.Share)
+		csksNegative[i] = cskNegative.PowBig(pk.eSubL2Elements(coeff, pk.toDeterministicL2Element(pk.DT)), sk.Share)
 	}
 
 	return &PartialDecrypt{csks, csksNegative, gsk, ct.Degree, ct.ScaleFactor}
 }
 
-func (bb *BlackBoxMPC) combinedShares(ct *Ciphertext, shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
+func (bb *BlackBoxMPC) combineShares(ct *Ciphertext, shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
 
 	if len(shares) < 1 {
 		panic("Number of shares to combine must be >= 1")
@@ -196,9 +228,9 @@ func (bb *BlackBoxMPC) combinedShares(ct *Ciphertext, shares []*PartialDecrypt, 
 	plaintextCoeffs := make([]int64, size)
 	for i := 0; i < size; i++ {
 
-		pt, err := pk.recoverMessageWithDL(gsk, csks[i])
+		pt, err := pk.recoverMessageWithDL(gsk, csks[i], true)
 		if err != nil {
-			pt, err := pk.recoverMessageWithDL(gsk, csksNegative[i])
+			pt, err := pk.recoverMessageWithDL(gsk, csksNegative[i], true)
 			if err != nil {
 				panic("second decrypt attempt failed. Message not recoverable")
 			}

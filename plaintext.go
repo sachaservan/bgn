@@ -10,7 +10,7 @@ var degreeSumTable []int64
 var degreeTable []int64
 var computedBase int
 
-const degreeBound = 64 // note: 3^64 > Int64 hence this is a generous upper bound
+const degreeBound = 128 // note: 3^64 > Int64 hence this is a generous upper bound
 
 // Plaintext struct holds data related to the polynomial encoded plaintext
 type Plaintext struct {
@@ -32,7 +32,6 @@ func NewUnbalancedPlaintext(m float64, b int, fpp int) *Plaintext {
 	// m is a rational number, encode it rationally
 	if math.Remainder(m, 1.0) != 0.0 {
 		numerator, scaleFactor := rationalize(m, b, fpp)
-		// fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, float64(numerator)/math.Pow(float64(b), float64(scaleFactor)))
 		coeffs, degree := unbalancedEncode(numerator, b, degreeTable, degreeSumTable)
 		return &Plaintext{coeffs, degree, b, scaleFactor}
 	}
