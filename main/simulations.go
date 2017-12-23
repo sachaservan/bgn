@@ -2,121 +2,158 @@ package main
 
 import (
 	"bgn"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"math/big"
+	"os"
+	"strconv"
 	"time"
 )
 
+// Simulation of Pearson's coorelation coefficient
 func examplePearsonsTestSimulation(numParties int, keyBits int, polyBase int, fpPrecision int, debug bool) {
 
 	pk, sk, shares, _ := bgn.NewMPCKeyGen(numParties, keyBits, polyBase, fpPrecision, true)
 	blackboxMPC := bgn.NewBlackboxMPC(shares, pk, sk)
 
-	// Start dealer code
+	// BEGIN dealer code
 	//**************************************************************************************
-	var placebo = []float64{56, 56, 65, 65, 50, 25, 87, 44, 35}
-	var caffeine = []float64{87, 91, 85, 91, 75, 28, 122, 66, 58}
 
-	numRows := len(caffeine)
+	x, y, err := parseLocation("/home/azuka/Desktop/age_sex.csv")
 
-	var ePlacebo []*bgn.Ciphertext
-	ePlacebo = make([]*bgn.Ciphertext, numRows)
-	var eCaffeine []*bgn.Ciphertext
-	eCaffeine = make([]*bgn.Ciphertext, numRows)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Finished parsing CSV file with no errors! |X|: %d, |Y|: %d\n", len(x), len(y))
 
-	sumPlaceboActual := 0.0
-	sumCaffeineActual := 0.0
+	// mini test dataset
+	// x = []float64{56, 56, 65, 65, 50, 25, 87, 44, 35}
+	// y = []float64{87, 91, 85, 91, 75, 28, 122, 66, 58}
+
+	numRows := len(y)
+
+	var eX []*bgn.Ciphertext
+	eX = make([]*bgn.Ciphertext, numRows)
+	var eY []*bgn.Ciphertext
+	eY = make([]*bgn.Ciphertext, numRows)
+
+	sumXActual := 0.0
+	sumYActual := 0.0
+
 	for i := 0; i < numRows; i++ {
 
-		sumPlaceboActual += placebo[i]
-		sumCaffeineActual += caffeine[i]
+		sumXActual += x[i]
+		sumYActual += y[i]
 
-		plaintextPlacebo := bgn.NewPlaintext(placebo[i], polyBase, pk.FPPrecision)
-		plaintextCaffeine := bgn.NewPlaintext(caffeine[i], polyBase, pk.FPPrecision)
+		plaintextX := bgn.NewPlaintext(big.NewFloat(x[i]), polyBase, pk.FPPrecision)
+		plaintextY := bgn.NewPlaintext(big.NewFloat(y[i]), polyBase, pk.FPPrecision)
 
-		ePlacebo[i] = pk.Encrypt(plaintextPlacebo)
-		eCaffeine[i] = pk.Encrypt(plaintextCaffeine)
+		eX[i] = pk.Encrypt(plaintextX)
+		eY[i] = pk.Encrypt(plaintextY)
 	}
-
 	//**************************************************************************************
-	// End dealer code
+	// END dealer code
 
+	// keep track of time
 	startTime := time.Now()
 
-	invNumRows := 1.0 / float64(numRows)
+	// store for later use
+	invNumRows := big.NewFloat(1.0 / float64(numRows))
+	numRowsFlt := big.NewFloat(float64(numRows))
 
-	// an encryption of zero
-	e0 := pk.Encrypt(bgn.NewPlaintext(0.0, pk.PolyBase, pk.FPPrecision))
+	// an encryption of zero to be used as initial value
+	enc0 := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase, pk.FPPrecision))
 
 	// sum of the squares
-	sumPlacebo := e0
-	sumCaffeine := e0
+	sumX2 := enc0
+	sumY2 := enc0
+	sumX := enc0
+	sumY := enc0
 
+	// compute sum of squares and sum of rows
 	for i := 0; i < numRows; i++ {
-		sumPlacebo = pk.EAdd(sumPlacebo, ePlacebo[i])
-		sumCaffeine = pk.EAdd(sumCaffeine, eCaffeine[i])
+		sumX = pk.EAdd(sumX, eX[i])
+		sumY = pk.EAdd(sumY, eY[i])
+
+		x2 := pk.EMult(eX[i], eX[i])
+		sumX2 = pk.EAdd(sumX2, x2)
+
+		y2 := pk.EMult(eY[i], eY[i])
+		sumY2 = pk.EAdd(sumY2, y2)
 	}
 
-	meanPlacebo := pk.EMultC(sumPlacebo, invNumRows)
-	meanCaffeine := pk.EMultC(sumCaffeine, invNumRows)
+	// get the mean
+	meanX := pk.EMultC(sumX, invNumRows)
+	meanY := pk.EMultC(sumY, invNumRows)
 
 	if debug {
 		// sanity check
-		fmt.Printf("MEAN PLACEBO: %s, sum=%s\n", sk.Decrypt(meanPlacebo, pk).String(), sk.Decrypt(sumPlacebo, pk).String())
-		fmt.Printf("MEAN CAFFEINE: %s, sum=%s\n", sk.Decrypt(meanCaffeine, pk).String(), sk.Decrypt(sumCaffeine, pk).String())
+		fmt.Printf("[DEBUG] MEAN X: %s, SUM X: %s\n", sk.Decrypt(meanX, pk).String(), sk.Decrypt(sumX, pk).String())
+		fmt.Printf("[DEBUG] MEAN Y: %s, SUM Y: %s\n", sk.Decrypt(meanY, pk).String(), sk.Decrypt(sumY, pk).String())
 	}
 
-	ssPlacebo := e0
-	ssCaffeine := e0
-	covariance := e0
+	// compute (sum x)^2 and (sum y)^2
+	sum2X := pk.EMult(sumX, sumX)
+	sum2Y := pk.EMult(sumY, sumY)
+
+	// compute n*(sum x^2) - (sum x)^2
+	varianceX := pk.EAdd(pk.EMultC(sumX2, numRowsFlt), pk.AInv(sum2X))
+
+	// compute n*(sum y^2) - (sum y)^2
+	varianceY := pk.EAdd(pk.EMultC(sumY2, numRowsFlt), pk.AInv(sum2Y))
+
+	// compute sum xy
+	sumOfProduct := enc0
 	for i := 0; i < numRows; i++ {
-
-		// TODO: pre-compute inv_mean?
-		smp := pk.EAdd(ePlacebo[i], pk.AInv(meanPlacebo))
-		ssPlacebo = pk.EAdd(ssPlacebo, pk.EMult(smp, smp))
-
-		smc := pk.EAdd(eCaffeine[i], pk.AInv(meanCaffeine))
-		ssCaffeine = pk.EAdd(ssCaffeine, pk.EMult(smc, smc))
-
-		covariance = pk.EAdd(covariance, pk.EMult(smp, smc))
-
+		sumOfProduct = pk.EAdd(sumOfProduct, pk.EMult(eX[i], eY[i]))
 	}
-
-	variancePlacebo := blackboxMPC.MPCEmult(ssPlacebo, ssPlacebo)
-	varianceCaffeine := blackboxMPC.MPCEmult(ssCaffeine, ssCaffeine)
 
 	if debug {
-		// begin sanity check
-		fmt.Printf("VARIANCE PLACEBO: %s\n", sk.Decrypt(variancePlacebo, pk).String())
-		fmt.Printf("VARIANCE CAFFEINE: %s\n", sk.Decrypt(varianceCaffeine, pk).String())
+		// sanity check
+		fmt.Printf("[DEBUG] VARIANCE X: %s\n", sk.Decrypt(varianceX, pk).String())
+		fmt.Printf("[DEBUG] VARIANCE Y: %s\n", sk.Decrypt(varianceY, pk).String())
 	}
 
-	covariance = pk.EMultC(covariance, 1.0/(float64(numRows+numRows)))
+	covariance := pk.EMult(blackboxMPC.MPCEncrypt(varianceY), blackboxMPC.MPCEncrypt(varianceX))
 
 	if debug {
-		// begin sanity check
-		fmt.Printf("COVARIANCE: %s\n", sk.Decrypt(covariance, pk).String())
+		// sanity check
+		fmt.Printf("[DEBUG] SUM OF PRODUCTS: %s\n", sk.Decrypt(sumOfProduct, pk).String())
+		fmt.Printf("[DEBUG] COVARIANCE: %s\n", sk.Decrypt(covariance, pk).String())
+
 	}
 
-	numerator := blackboxMPC.MPCEmult(covariance, covariance)
-	denom := blackboxMPC.MPCEmult(variancePlacebo, varianceCaffeine)
+	// compute (sum x)(sum y)
+	prodSums := pk.EMult(sumY, sumX)
 
-	//r2 := blackboxMPC.MPCEmult(numerator, blackboxMPC.MPCEMInv(denom))
+	// compute the numerator^2 = [n*(sum xy) - (sum x)(sum y)]^2
+	numerator := pk.EAdd(pk.EMultC(sumOfProduct, numRowsFlt), pk.AInv(prodSums))
+	numerator = blackboxMPC.MPCEncrypt(numerator)
+	numerator = pk.EMult(numerator, numerator)
 
-	fmt.Println("Denominator: " + sk.Decrypt(denom, pk).String())
-	fmt.Println("Numerator: " + sk.Decrypt(numerator, pk).String())
+	denominator := covariance
 
-	res, _ := sk.Decrypt(numerator, pk).PolyEval().Float64()
-	resd, _ := sk.Decrypt(denom, pk).PolyEval().Float64()
+	if debug {
+		// sanity check
+		fmt.Printf("[DEBUG] NUMERATOR: %s\n", sk.Decrypt(numerator, pk).String())
+		fmt.Printf("[DEBUG] DENOMINATOR: %s\n", sk.Decrypt(denominator, pk).String())
+	}
 
-	r := math.Sqrt(res / resd)
+	// compute division in the clear
+	num, _ := sk.Decrypt(numerator, pk).PolyEval().Float64()
+	denom, _ := sk.Decrypt(denominator, pk).PolyEval().Float64()
 
-	fmt.Printf("r %f\n", r)
+	res := num / denom
+
+	r := math.Sqrt(res)
 
 	endTime := time.Now()
-	log.Println("runtime: " + endTime.Sub(startTime).String())
 
+	fmt.Printf("Pearson's corelation coefficient, r = %f\n", r)
+	fmt.Println("Runtime: " + endTime.Sub(startTime).String())
 }
 
 func exampleTTestSimulation(numParties int, keyBits int, polyBase int, fpPrecision int, debug bool) {
@@ -126,128 +163,192 @@ func exampleTTestSimulation(numParties int, keyBits int, polyBase int, fpPrecisi
 
 	// Start dealer code
 	//**************************************************************************************
-	var placebo = []float64{105.0, 119.0, 100.0, 97.0, 96.0, 101.0, 94.0, 95.0, 98.0}
-	var caffeine = []float64{96.0, 99.0, 94.0, 89.0, 96.0, 93.0, 88.0, 105.0, 88.0}
+	x, y, err := parseLocation("/home/azuka/Desktop/age_sex.csv")
 
-	numRows := len(caffeine)
+	if err != nil {
+		panic(err)
+	}
 
-	var ePlacebo []*bgn.Ciphertext
-	ePlacebo = make([]*bgn.Ciphertext, numRows)
-	var eCaffeine []*bgn.Ciphertext
-	eCaffeine = make([]*bgn.Ciphertext, numRows)
+	fmt.Printf("Finished parsing CSV file with no errors! |X|: %d, |Y|: %d\n", len(x), len(y))
 
-	sumPlaceboActual := 0.0
-	sumCaffeineActual := 0.0
+	// mini test dataset
+	// x = []float64{105.0, 119.0, 100.0, 97.0, 96.0, 101.0, 94.0, 95.0, 98.0}
+	// y = []float64{96.0, 99.0, 94.0, 89.0, 96.0, 93.0, 88.0, 105.0, 88.0}
+
+	numRows := len(y)
+
+	var eX []*bgn.Ciphertext
+	eX = make([]*bgn.Ciphertext, numRows)
+	var eY []*bgn.Ciphertext
+	eY = make([]*bgn.Ciphertext, numRows)
+
+	sumXActual := 0.0
+	sumYActual := 0.0
 	for i := 0; i < numRows; i++ {
 
-		sumPlaceboActual += placebo[i]
-		sumCaffeineActual += caffeine[i]
+		sumXActual += x[i]
+		sumYActual += y[i]
 
-		plaintextPlacebo := bgn.NewPlaintext(placebo[i], polyBase, pk.FPPrecision)
-		plaintextCaffeine := bgn.NewPlaintext(caffeine[i], polyBase, pk.FPPrecision)
+		plaintextX := bgn.NewPlaintext(big.NewFloat(x[i]), polyBase, pk.FPPrecision)
+		plaintextY := bgn.NewPlaintext(big.NewFloat(y[i]), polyBase, pk.FPPrecision)
 
-		ePlacebo[i] = pk.Encrypt(plaintextPlacebo)
-		eCaffeine[i] = pk.Encrypt(plaintextCaffeine)
+		eX[i] = pk.Encrypt(plaintextX)
+		eY[i] = pk.Encrypt(plaintextY)
 	}
 
 	//**************************************************************************************
 	// End dealer code
 
+	fmt.Println("[DEBUG] Finished encrypting dataset")
+
 	startTime := time.Now()
 
-	invNumRows := 1.0 / float64(numRows)
+	invNumRows := big.NewFloat(1.0 / float64(numRows))
 
-	// an encryption of zero
-	e0 := pk.Encrypt(bgn.NewPlaintext(0.0, pk.PolyBase, pk.FPPrecision))
+	// encryption of zero for init value
+	e0 := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase, pk.FPPrecision))
 
-	// sum of the squares
-	sumPlacebo2 := e0
-	sumCaffeine2 := e0
-	sumPlacebo := e0
-	sumCaffeine := e0
+	// compute sum x^2 and sum y^2
+	sumX2 := e0
+	sumY2 := e0
+
+	// compute sum x and sum y
+	sumX := e0
+	sumY := e0
 
 	for i := 0; i < numRows; i++ {
-		sumPlacebo = pk.EAdd(sumPlacebo, ePlacebo[i])
-		sumCaffeine = pk.EAdd(sumCaffeine, eCaffeine[i])
+		sumX = pk.EAdd(sumX, eX[i])
+		sumY = pk.EAdd(sumY, eY[i])
 
-		placebo2 := pk.EMult(ePlacebo[i], ePlacebo[i])
-		sumPlacebo2 = pk.EAdd(sumPlacebo2, placebo2)
+		x2 := pk.EMult(eX[i], eX[i])
+		sumX2 = pk.EAdd(sumX2, x2)
 
-		caffeine2 := pk.EMult(eCaffeine[i], eCaffeine[i])
-		sumCaffeine2 = pk.EAdd(sumCaffeine2, caffeine2)
+		y2 := pk.EMult(eY[i], eY[i])
+		sumY2 = pk.EAdd(sumY2, y2)
 	}
 
-	meanPlacebo := pk.EMultC(sumPlacebo, invNumRows)
-	meanCaffeine := pk.EMultC(sumCaffeine, invNumRows)
+	meanX := pk.EMultC(sumX, invNumRows)
+	meanY := pk.EMultC(sumY, invNumRows)
 
 	if debug {
 		// sanity check
-		fmt.Printf("[DEBUG] MEAN PLACEBO: %s\n", sk.Decrypt(meanPlacebo, pk).String())
-		fmt.Printf("[DEBUG] MEAN CAFFEINE: %s\n", sk.Decrypt(meanCaffeine, pk).String())
+		fmt.Printf("[DEBUG] MEAN X: %s\n", sk.Decrypt(meanX, pk).String())
+		fmt.Printf("[DEBUG] MEAN Y: %s\n", sk.Decrypt(meanY, pk).String())
 	}
 
-	ssPlacebo := e0
-	ssCaffeine := e0
+	ssX := e0
+	ssY := e0
 	for i := 0; i < numRows; i++ {
 
-		smp := pk.EAdd(ePlacebo[i], pk.AInv(meanPlacebo))
-		ssPlacebo = pk.EAdd(ssPlacebo, pk.EMult(smp, smp))
+		smp := pk.EAdd(eX[i], pk.AInv(meanX))
+		ssX = pk.EAdd(ssX, pk.EMult(smp, smp))
 
-		smc := pk.EAdd(eCaffeine[i], pk.AInv(meanCaffeine))
-		ssCaffeine = pk.EAdd(ssCaffeine, pk.EMult(smc, smc))
+		smc := pk.EAdd(eY[i], pk.AInv(meanY))
+		ssY = pk.EAdd(ssY, pk.EMult(smc, smc))
 	}
 
 	if debug {
-		// begin sanity check
-		fmt.Printf("[DEBUG] VARIANCE PLACEBO: %s\n", sk.Decrypt(ssPlacebo, pk).PolyEval().String())
-		fmt.Printf("[DEBUG] VARIANCE CAFFEINE: %s\n", sk.Decrypt(ssCaffeine, pk).PolyEval().String())
+		// sanity check
+		fmt.Printf("[DEBUG] VARIANCE X: %s\n", sk.Decrypt(ssX, pk).PolyEval().String())
+		fmt.Printf("[DEBUG] VARIANCE Y: %s\n", sk.Decrypt(ssY, pk).PolyEval().String())
 	}
 
-	ssPlacebo = pk.EMultC(ssPlacebo, invNumRows)
-	ssCaffeine = pk.EMultC(ssCaffeine, invNumRows)
+	ssX = pk.EMultC(ssX, invNumRows)
+	ssY = pk.EMultC(ssY, invNumRows)
 
 	if debug {
-		// begin sanity check
-		sdPlaceboFloat, _ := sk.Decrypt(ssPlacebo, pk).PolyEval().Float64()
-		sdCaffeineFloat, _ := sk.Decrypt(ssCaffeine, pk).PolyEval().Float64()
-		fmt.Printf("[DEBUG] SD PLACEBO: %f\n", math.Sqrt(sdPlaceboFloat))
-		fmt.Printf("[DEBUG] SD CAFFEINE: %f\n", math.Sqrt(sdCaffeineFloat))
+		// sanity check
+		sdXFloat, _ := sk.Decrypt(ssX, pk).PolyEval().Float64()
+		sdYFloat, _ := sk.Decrypt(ssY, pk).PolyEval().Float64()
+		fmt.Printf("[DEBUG] SD X: %f\n", math.Sqrt(sdXFloat))
+		fmt.Printf("[DEBUG] SD Y: %f\n", math.Sqrt(sdYFloat))
 	}
 
-	top := pk.EAdd(meanPlacebo, pk.AInv(meanCaffeine))
+	top := pk.EAdd(meanX, pk.AInv(meanY))
 	top = pk.EMult(top, top)
 
-	ta := pk.EAdd(sumPlacebo2, pk.AInv(pk.EMultC(pk.EMult(sumPlacebo, sumPlacebo), invNumRows)))
-	tb := pk.EAdd(sumCaffeine2, pk.AInv(pk.EMultC(pk.EMult(sumCaffeine, sumCaffeine), invNumRows)))
+	ta := pk.EAdd(sumX2, pk.AInv(pk.EMultC(pk.EMult(sumX, sumX), invNumRows)))
+	tb := pk.EAdd(sumY2, pk.AInv(pk.EMultC(pk.EMult(sumY, sumY), invNumRows)))
 
 	bottom := pk.EAdd(ta, tb)
 
 	if debug {
-		// begin sanity check
+		// sanity check
 		fmt.Printf("[DEBUG] t1: %s\n", sk.Decrypt(bottom, pk).String())
 	}
 
-	bottom = pk.EMultC(bottom, 1.0/(float64(numRows+numRows-2)))
+	bottom = pk.EMultC(bottom, big.NewFloat(1.0/(float64(numRows+numRows-2))))
 
 	if debug {
-		// begin sanity check
+		// sanity check
 		fmt.Printf("[DEBUG] t2: %s\n", sk.Decrypt(bottom, pk).String())
 	}
 
-	bottom = pk.EMultC(bottom, 2.0/float64(numRows))
+	bottom = pk.EMultC(bottom, big.NewFloat(2.0/float64(numRows)))
 
 	if debug {
-		// begin sanity check
+		// sanity check
 		fmt.Printf("[DEBUG] t3: %s, %f\n", sk.Decrypt(bottom, pk).String(), 1.0/(float64(numRows+numRows-2)))
 	}
 
-	res := blackboxMPC.MPCEmult(top, blackboxMPC.MPCEMInv(bottom))
-	tstat2, _ := blackboxMPC.MPCDecrypt(res).PolyEval().Float64()
-	tstatistic := math.Sqrt(tstat2)
+	numerator := blackboxMPC.MPCEncrypt(top)
 
-	fmt.Printf("T statistic %f\n", tstatistic)
+	num, _ := blackboxMPC.MPCDecrypt(numerator).PolyEval().Float64()
+	denom, _ := blackboxMPC.MPCDecrypt(bottom).PolyEval().Float64()
+
+	tstatistic := num / denom
 
 	endTime := time.Now()
-	log.Println("runtime: " + endTime.Sub(startTime).String())
+
+	fmt.Printf("T statistic, p = %f\n", math.Sqrt(tstatistic))
+	log.Println("Runtime: " + endTime.Sub(startTime).String())
+
+}
+
+func parseLocation(file string) ([]float64, []float64, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+
+	csvr := csv.NewReader(f)
+
+	data1 := make([]float64, 0)
+	data2 := make([]float64, 0)
+
+	isHeader := true
+	for {
+		row, err := csvr.Read()
+
+		if isHeader {
+			isHeader = false
+			continue
+		}
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+
+			return data1, data2, err
+		}
+
+		var val1 float64
+		var val2 float64
+
+		if val1, err = strconv.ParseFloat(row[0], 64); err != nil {
+			continue
+		}
+		if val2, err = strconv.ParseFloat(row[1], 64); err != nil {
+			continue
+		}
+
+		// fmt.Printf("Val is %f", val1)
+		// fmt.Printf("Val is %f", val2)
+
+		data1 = append(data1, val1)
+		data2 = append(data2, val2)
+
+	}
 
 }

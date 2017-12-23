@@ -37,17 +37,18 @@ func computeTableGT(gen *pbc.Element, bound int64) {
 	}
 }
 
-// obtain the discrete log in O(sqrt(T)) time using pollard's kangaroo alg
+// obtain the discrete log in O(sqrt(T)) time using giant step baby step algorithm
 func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.Int, error) {
 
 	// sqrt of the largest possible message
 	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
 
-	if l2 && tableGT == nil {
-		computeTableGT(gsk, bound)
-	} else if tableG1 == nil {
-		computeTableG1(gsk, bound)
-	}
+	// pre-compute the tables for the giant steps
+	//if l2 && tableGT == nil {
+	computeTableGT(gsk, bound)
+	//} else if tableG1 == nil {
+	computeTableG1(gsk, bound)
+	//}
 
 	aux := csk.NewFieldElement()
 
@@ -66,6 +67,8 @@ func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.In
 
 	for i := int64(0); i < bound; i++ {
 
+		ok = false
+		val = 0
 		if l2 {
 			val, ok = tableGT[aux.String()]
 		} else {

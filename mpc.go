@@ -19,41 +19,41 @@ type SecretKeyShare struct {
 	Share *big.Int
 }
 
-// multiply ct1*ct2 together in MPC
-// Party 0 send everyone E(ct2)
-// Party i generate/compute a_i, E(a_i) and E(ct2 a_i). Send E(a_i) and E(b a_i) to Party 0
-// Party 0 computes E(ct1) – E(a), where E(a) is the sum of E(a_i)’s.
-// All decrypt E(ct1-a) 1/b/r * 1/r
-// Party 0 computes E(ct2)*(ct1-a) + E(ct2*a) from E(ct2*a_i) it got in step 2.
+/* multiply ct1*ct2 together in MPC
+ * Party 0 send everyone E(ct2)
+ * Party i generate/compute a_i, E(a_i) and E(ct2 a_i). Send E(a_i) and E(b a_i) to Party 0
+ * Party 0 computes E(ct1) – E(a), where E(a) is the sum of E(a_i)’s.
+ * All decrypt E(ct1-a) 1/b/r * 1/r
+ * Party 0 computes E(ct2)*(ct1-a) + E(ct2*a) from E(ct2*a_i) it got in step 2.
+ */
 
-type MPCEMultRequest struct {
+type MPCRequest struct {
 	Ct *Ciphertext
 }
 
-type MPCEMultResponse struct {
-	PartialTermA  *Ciphertext // E(a_i)
-	PartialTermBA *Ciphertext // E(b*a_i)
+type MPCResponse struct {
+	PartialCt   *Ciphertext
+	PartialRand *Ciphertext
 }
 
-type MPCEMultReceptacle struct {
-	TermA  *Ciphertext
-	TermBA *Ciphertext
+type MPCReceptacle struct {
+	Ct   *Ciphertext
+	Rand *Ciphertext
 }
 
 type PartialDecrypt struct {
-	Csks         []*pbc.Element
-	CsksNegative []*pbc.Element
-	Gsk          *pbc.Element
-	Degree       int
-	ScaleFactor  int
+	Csks        []*pbc.Element
+	Gsk         *pbc.Element
+	Degree      int
+	ScaleFactor int
 }
 
 func NewBlackboxMPC(shares []*SecretKeyShare, pk *PublicKey, sk *SecretKey) *BlackBoxMPC {
 	return &BlackBoxMPC{shares, pk, sk, len(shares)}
 }
 
-func NewMPCEmultRequest(ct *Ciphertext) *MPCEMultRequest {
-	return &MPCEMultRequest{ct}
+func NewMPCRequest(ct *Ciphertext) *MPCRequest {
+	return &MPCRequest{ct}
 }
 
 func (bb *BlackBoxMPC) MPCDecrypt(ct *Ciphertext) *Plaintext {
@@ -74,79 +74,111 @@ func (bb *BlackBoxMPC) MPCDecrypt(ct *Ciphertext) *Plaintext {
 	return result
 }
 
-func (bb *BlackBoxMPC) MPCEmult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
+func (bb *BlackBoxMPC) MPCEncrypt(ct *Ciphertext) *Ciphertext {
 
-	var result *MPCEMultReceptacle
+	var result *MPCReceptacle
 
 	for i := 0; i < bb.NumParties; i++ {
-		req := NewMPCEmultRequest(ct2)
-		res := bb.Pk.RequestMPCMultiplication(req)
+		res := bb.Pk.requestMPCReEncryption(ct)
 
 		if result == nil {
-			result = &MPCEMultReceptacle{TermA: res.PartialTermA, TermBA: res.PartialTermBA}
+			result = &MPCReceptacle{Ct: res.PartialCt, Rand: res.PartialRand}
 		} else {
-			result.TermA = bb.Pk.EAdd(result.TermA, res.PartialTermA)
-			result.TermBA = bb.Pk.EAdd(result.TermBA, res.PartialTermBA)
+			bb.Pk.EAdd(result.Ct, res.PartialCt)
+
+			for k := 0; k < len(res.PartialRand.Coefficients); k++ {
+				result.Rand.Coefficients[k] = bb.Pk.eAddElements(result.Rand.Coefficients[k],
+					res.PartialRand.Coefficients[k])
+			}
 		}
 	}
 
-	partial := bb.Pk.EAdd(ct1, bb.Pk.AInv(result.TermA))
-	term1 := bb.MPCDecrypt(partial)
+	plaintext := bb.MPCDecrypt(result.Ct)
+	recrypt := bb.Pk.Encrypt(plaintext)
 
-	term1Float, _ := term1.PolyEval().Float64()
-
-	if term1Float < 0 {
-		term1Float *= -1.0
-		return bb.Pk.AInv(bb.Pk.EAdd(bb.Pk.EMultC(ct2, term1Float), bb.Pk.AInv(result.TermBA)))
-	}
-
-	return bb.Pk.EAdd(bb.Pk.EMultC(ct2, term1Float), result.TermBA)
+	return bb.Pk.EAdd(recrypt, bb.Pk.AInv(result.Rand))
 }
 
 func (bb *BlackBoxMPC) MPCEMInv(ct *Ciphertext) *Ciphertext {
 
-	var result *MPCEMultReceptacle
+	fmt.Println("Message space is " + bb.Pk.T.String())
 
-	for i := 0; i < bb.NumParties; i++ {
-		req := NewMPCEmultRequest(ct)
-		res := bb.Pk.RequestMPCMultiplication(req)
+	fmt.Println("Original ciphertext was " + bb.MPCDecrypt(ct).String())
+	ct = bb.Pk.scaleDownL2Ciphertext(ct)
+	fmt.Println("Scaled down ciphertext is " + bb.MPCDecrypt(ct).String())
 
-		if result == nil {
-			result = &MPCEMultReceptacle{TermA: res.PartialTermA, TermBA: res.PartialTermBA}
-		} else {
-			result.TermA = bb.Pk.EAdd(result.TermA, res.PartialTermA)
-			result.TermBA = bb.Pk.EAdd(result.TermBA, res.PartialTermBA)
-		}
+	result := bb.Pk.Encrypt(NewPlaintext(big.NewFloat(0.09), bb.Pk.PolyBase, bb.Pk.FPPrecision))
+
+	for i := 0; i <= 10; i++ {
+		fmt.Println("Result of division is now " + bb.MPCDecrypt(result).String())
+		fmt.Printf("Poly degree is now %d\n", result.Degree)
+		result2 := bb.Pk.EMult(bb.MPCEncrypt(bb.Pk.EMult(result, result)), ct)
+		result = bb.Pk.EMultC(result, big.NewFloat(2.0))
+		result = bb.Pk.EAdd(result, bb.Pk.AInv(result2))
+		result = bb.MPCEncrypt(result)
 	}
 
-	res, _ := bb.Sk.Decrypt(result.TermBA, bb.Pk).PolyEval().Float64()
-	inverse := bb.Pk.EMultC(result.TermA, 1.0/res)
-
-	return inverse
+	return result
 }
 
-func (pk *PublicKey) RequestMPCMultiplication(request *MPCEMultRequest) *MPCEMultResponse {
+func (pk *PublicKey) scaleDownL2Ciphertext(ct *Ciphertext) *Ciphertext {
 
-	// [TODO][v2]: find a meaningful constant
-	arbitraryConstant1 := int64(100)
-	arbitraryConstant2 := int64(10)
+	newCoefficients := make([]*pbc.Element, 1)
+	newCoefficients[0] = ct.Coefficients[0]
 
-	// [TODO][v2]: find a better random factor
-	seed := float64(newCryptoRandom(pk.T).Int64())
-	randomPoly := NewPlaintext(seed, pk.PolyBase, pk.FPPrecision)
-	randomPoly.ScaleFactor = int(newCryptoRandom(big.NewInt(arbitraryConstant1)).Int64())
+	for i := 1; i < ct.Degree; i++ {
 
-	// [TODO][v2]: match the number of coefficients to be equal to the other ciphertext?
-	for i := 0; i < len(randomPoly.Coefficients); i++ {
-		randomPoly.Coefficients[i] = randomPoly.Coefficients[i] + newCryptoRandom(big.NewInt(arbitraryConstant2)).Int64()
+		value := ct.Coefficients[i]
+		var pow *big.Int
+		if degreeTable != nil && len(degreeTable) > i {
+			pow = degreeTable[i]
+		} else {
+			pow = big.NewInt(0).Exp(big.NewInt(int64(pk.PolyBase)), big.NewInt(int64(i)), nil)
+		}
+
+		value = pk.eMultCElement(value, pow, true)
+		newCoefficients[0] = pk.eAddElements(newCoefficients[0], value)
 	}
 
-	randomFloat, _ := randomPoly.PolyEval().Float64()
-	termAEnc := pk.Encrypt(randomPoly)
+	scaleFactor := ct.ScaleFactor
+	//invPow := big.NewInt(0).Sub(pk.T, big.NewInt(2))
 
-	fmt.Println("[DEBUG] Random polynomial evaluates to " + randomPoly.PolyEval().String())
+	// for i := 2; i <= ct.Degree; i++ {
 
-	return &MPCEMultResponse{termAEnc, pk.EMultC(request.Ct, randomFloat)}
+	// 	value := newCoefficients[0]
+	// 	pow := big.NewInt(0).Exp(big.NewInt(int64(pk.PolyBase)), big.NewInt(int64(i-1)), nil)
+	// 	modInv := pow.Exp(pow, invPow, pk.T)
+	// 	value = pk.eMultCElementL2(value, modInv, true)
+
+	// 	fmt.Println("modInv for pow is " + modInv.String() + " where pow is " + pow.String())
+	// 	newCoefficients[0] = value
+	// 	scaleFactor--
+	// }
+
+	return &Ciphertext{newCoefficients, 1, scaleFactor, ct.L2}
+
+}
+
+func (pk *PublicKey) requestMPCMultiplicativeRandomization(ct *Ciphertext) *MPCResponse {
+
+	randFloat := big.NewFloat(float64(newCryptoRandom(pk.T).Int64()) + 1.0)
+	rand := pk.Encrypt(NewUnbalancedPlaintext(randFloat, pk.PolyBase, pk.FPPrecision))
+
+	return &MPCResponse{pk.EMultC(ct, randFloat), rand}
+}
+
+func (pk *PublicKey) requestMPCReEncryption(ct *Ciphertext) *MPCResponse {
+
+	randCt := ct.Copy()
+	rand := &Ciphertext{make([]*pbc.Element, randCt.Degree), randCt.Degree, randCt.ScaleFactor, false}
+
+	for i := 0; i < len(randCt.Coefficients); i++ {
+		randVal := pk.encrypt(newCryptoRandom(pk.T))
+		randCt.Coefficients[i] = pk.eAddL2Elements(randCt.Coefficients[i], pk.toDeterministicL2Element(randVal))
+		rand.Coefficients[i] = randVal
+	}
+
+	return &MPCResponse{randCt, rand}
 }
 
 func (sk *SecretKeyShare) partialDecrypt(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
@@ -156,27 +188,21 @@ func (sk *SecretKeyShare) partialDecrypt(ct *Ciphertext, pk *PublicKey) *Partial
 	}
 
 	csks := make([]*pbc.Element, ct.Degree)
-	// TODO: find a better way than having to keep two ciphertexts
-	csksNegative := make([]*pbc.Element, ct.Degree)
+
 	gsk := pk.G1.NewFieldElement()
 	gsk = gsk.PowBig(pk.P, sk.Share)
 
 	for i, coeff := range ct.Coefficients {
 		csk := pk.G1.NewFieldElement()
 		csks[i] = csk.PowBig(coeff, sk.Share)
-
-		cskNegative := pk.G1.NewFieldElement()
-		csksNegative[i] = cskNegative.PowBig(pk.eSubElements(coeff, pk.DT), sk.Share)
 	}
 
-	return &PartialDecrypt{csks, csksNegative, gsk, ct.Degree, ct.ScaleFactor}
+	return &PartialDecrypt{csks, gsk, ct.Degree, ct.ScaleFactor}
 }
 
 func (sk *SecretKeyShare) partialDecryptL2(ct *Ciphertext, pk *PublicKey) *PartialDecrypt {
 
 	csks := make([]*pbc.Element, ct.Degree)
-	// TODO: find a better way than having to keep two ciphertexts
-	csksNegative := make([]*pbc.Element, ct.Degree)
 
 	gsk := pk.Pairing.NewGT().Pair(pk.P, pk.P)
 	gsk = gsk.PowBig(gsk, sk.Share)
@@ -184,12 +210,9 @@ func (sk *SecretKeyShare) partialDecryptL2(ct *Ciphertext, pk *PublicKey) *Parti
 	for i, coeff := range ct.Coefficients {
 		csk := pk.Pairing.NewGT().NewFieldElement()
 		csks[i] = csk.PowBig(coeff, sk.Share)
-
-		cskNegative := pk.Pairing.NewGT().NewFieldElement()
-		csksNegative[i] = cskNegative.PowBig(pk.eSubL2Elements(coeff, pk.toDeterministicL2Element(pk.DT)), sk.Share)
 	}
 
-	return &PartialDecrypt{csks, csksNegative, gsk, ct.Degree, ct.ScaleFactor}
+	return &PartialDecrypt{csks, gsk, ct.Degree, ct.ScaleFactor}
 }
 
 func (bb *BlackBoxMPC) combineShares(ct *Ciphertext, shares []*PartialDecrypt, pk *PublicKey) *Plaintext {
@@ -206,9 +229,6 @@ func (bb *BlackBoxMPC) combineShares(ct *Ciphertext, shares []*PartialDecrypt, p
 	for i := 0; i < size; i++ {
 		csks[i] = shares[0].Csks[i].NewFieldElement()
 		csks[i].Set(shares[0].Csks[i])
-
-		csksNegative[i] = shares[0].CsksNegative[i].NewFieldElement()
-		csksNegative[i].Set(shares[0].CsksNegative[i])
 	}
 
 	for index, share := range shares {
@@ -219,7 +239,6 @@ func (bb *BlackBoxMPC) combineShares(ct *Ciphertext, shares []*PartialDecrypt, p
 
 		for i := 0; i < size; i++ {
 			csks[i].Mul(csks[i], share.Csks[i])
-			csksNegative[i].Mul(csksNegative[i], share.CsksNegative[i])
 		}
 
 		gsk = gsk.Mul(gsk, share.Gsk)
@@ -250,7 +269,7 @@ func NewMPCKeyGen(numShares int, keyBits int, polyBase int, fpPrecision int, det
 
 	// generate standard key pair
 	var sk *SecretKey
-	pk, sk, err := NewKeyGen(keyBits, polyBase, fpPrecision, deterministic)
+	pk, sk, err := NewKeyGen(keyBits, big.NewInt(15010109923), polyBase, fpPrecision, deterministic)
 
 	if err != nil {
 		return nil, nil, nil, err

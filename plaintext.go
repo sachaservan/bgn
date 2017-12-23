@@ -6,8 +6,8 @@ import (
 	"math/big"
 )
 
-var degreeSumTable []int64
-var degreeTable []int64
+var degreeSumTable []*big.Int
+var degreeTable []*big.Int
 var computedBase int
 
 const degreeBound = 128 // note: 3^64 > Int64 hence this is a generous upper bound
@@ -22,84 +22,101 @@ type Plaintext struct {
 
 // NewUnbalancedPlaintext generates an unbalanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewUnbalancedPlaintext(m float64, b int, fpp int) *Plaintext {
+func NewUnbalancedPlaintext(m *big.Float, b int, fpp int) *Plaintext {
 
 	if degreeTable == nil || computedBase != b {
 		computedBase = b
-		degreeTable, degreeSumTable = computeDegreeTable(b, degreeBound)
+		degreeTable, degreeSumTable = computeDegreeTable(big.NewInt(int64(b)), degreeBound)
 	}
 
+	mFloat, _ := m.Float64()
 	// m is a rational number, encode it rationally
-	if math.Remainder(m, 1.0) != 0.0 {
-		numerator, scaleFactor := rationalize(m, b, fpp)
-		coeffs, degree := unbalancedEncode(numerator, b, degreeTable, degreeSumTable)
+	if math.Remainder(mFloat, 1.0) != 0.0 {
+		mFloat, _ := m.Float64()
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b, fpp)
+		mInt := big.NewInt(0)
+		m.Int(mInt)
+		mInt.Add(mInt, big.NewInt(numerator))
+
+		coeffs, degree := unbalancedEncode(mInt, b, degreeTable, degreeSumTable)
 		return &Plaintext{coeffs, degree, b, scaleFactor}
 	}
 
-	//m is an int
-	coeffs, degree := unbalancedEncode(int64(m), b, degreeTable, degreeSumTable)
+	// m is an big.Int
+	mInt := big.NewInt(0)
+	m.Int(mInt)
+	coeffs, degree := unbalancedEncode(mInt, b, degreeTable, degreeSumTable)
 	return &Plaintext{coeffs, degree, b, 0}
 }
 
 // NewPlaintext generates an balanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewPlaintext(m float64, b int, fpp int) *Plaintext {
+func NewPlaintext(m *big.Float, b int, fpp int) *Plaintext {
 
 	if degreeTable == nil || computedBase != b {
-		computedBase = b
-		degreeTable, degreeSumTable = computeDegreeTable(b, degreeBound)
+		degreeTable, degreeSumTable = computeDegreeTable(big.NewInt(int64(b)), degreeBound)
 	}
 
+	mFloat, _ := m.Float64()
+
 	// m is a rational number, encode it rationally
-	if math.Remainder(m, 1.0) != 0.0 {
-		numerator, scaleFactor := rationalize(m, b, fpp)
+	if math.Remainder(mFloat, 1.0) != 0.0 {
+
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b, fpp)
+		mInt := big.NewInt(0)
+		m.Int(mInt)
+		mInt.Add(mInt, big.NewInt(numerator))
+
 		// fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, float64(numerator)/math.Pow(float64(b), float64(scaleFactor)))
-		coeffs, degree := balancedEncode(numerator, b, degreeTable, degreeSumTable)
+		coeffs, degree := balancedEncode(mInt, b, degreeTable, degreeSumTable)
 		return &Plaintext{coeffs, degree, b, scaleFactor}
 	}
 
 	//m is an int
-	coeffs, degree := balancedEncode(int64(m), b, degreeTable, degreeSumTable)
+	mInt := big.NewInt(0)
+	m.Int(mInt)
+	coeffs, degree := balancedEncode(mInt, b, degreeTable, degreeSumTable)
 	return &Plaintext{coeffs, degree, b, 0}
 }
 
-func computeDegreeTable(base int, bound int) ([]int64, []int64) {
+func computeDegreeTable(base *big.Int, bound int) ([]*big.Int, []*big.Int) {
 
-	degreeTable := make([]int64, bound)
-	degreeSumTable := make([]int64, bound)
+	degreeTable := make([]*big.Int, bound)
+	degreeSumTable := make([]*big.Int, bound)
 
-	sum := int64(1)
-	degreeSumTable[0] = sum
-	degreeTable[0] = 1
+	sum := big.NewInt(1)
+	degreeSumTable[0] = big.NewInt(1)
+	degreeTable[0] = big.NewInt(1)
 
 	for i := 1; i < bound; i++ {
-		result := int64(math.Pow(float64(base), float64(i)))
-		sum += result
+		result := big.NewInt(0).Exp(base, big.NewInt(int64(i)), nil)
+		sum.Add(sum, result)
 		degreeTable[i] = result
-		degreeSumTable[i] = sum
+		degreeSumTable[i] = big.NewInt(0)
+		degreeSumTable[i].Set(sum)
 	}
 
 	return degreeTable, degreeSumTable
 }
 
 // compute the closest degree to the target value
-func degree(target int64, sums []int64, bound int, balanced bool) int {
+func degree(target *big.Int, sums []*big.Int, bound int, balanced bool) int {
 
-	if target == 1 {
+	if target.Int64() == 1 {
 		return 0
 	}
 
 	if balanced {
 
 		for i := 1; i <= bound; i++ {
-			if degreeSumTable[i] >= target {
+			if degreeSumTable[i].Cmp(target) >= 0 {
 				return i
 			}
 		}
 
 	} else {
 		for i := 1; i <= bound; i++ {
-			if degreeTable[i] > target {
+			if degreeTable[i].Cmp(target) >= 1 {
 				return i - 1
 			}
 		}
@@ -108,16 +125,16 @@ func degree(target int64, sums []int64, bound int, balanced bool) int {
 	return -1
 }
 
-func unbalancedEncode(target int64, base int, degrees []int64, sumDegrees []int64) ([]int64, int) {
+func unbalancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]int64, int) {
 
 	// special case
-	if target == 0 {
+	if target.Cmp(big.NewInt(0)) == 0 {
 		coefficients := make([]int64, 1)
 		coefficients[0] = 0
 		return coefficients, 1
 	}
 
-	if target < 0 {
+	if target.Cmp(big.NewInt(0)) < 0 {
 		panic("Negative encoding not supported")
 	}
 
@@ -139,34 +156,35 @@ func unbalancedEncode(target int64, base int, degrees []int64, sumDegrees []int6
 		}
 
 		value := degrees[index]
+		value2 := big.NewInt(0).Mul(degrees[index], big.NewInt(2))
 
-		if 2*value <= target {
-			value *= 2
+		if value2.Cmp(target) <= 0 {
+			value = value2
 			coefficients[index] = 2
 		} else {
 			coefficients[index] = 1
 		}
 
-		if value == target {
+		if value.Cmp(target) == 0 {
 			return coefficients[:bound+1], bound + 1
 		}
 
-		target = target - value
+		target.Sub(target, value)
 	}
 }
 
-func balancedEncode(target int64, base int, degrees []int64, sumDegrees []int64) ([]int64, int) {
+func balancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]int64, int) {
 
 	// special case
-	if target == 0 {
+	if target.Int64() == 0 {
 		coefficients := make([]int64, 1)
 		coefficients[0] = 0
 		return coefficients, 1
 	}
 
-	isNegative := target < 0
+	isNegative := big.NewInt(0).Cmp(target) > 0
 	if isNegative {
-		target *= -1
+		target.Mul(target, big.NewInt(-1))
 	}
 
 	if sumDegrees == nil {
@@ -193,7 +211,7 @@ func balancedEncode(target int64, base int, degrees []int64, sumDegrees []int64)
 			coefficients[index] *= -1
 		}
 
-		if degrees[index] == target {
+		if degrees[index].Cmp(target) == 0 {
 
 			// make the poly negative
 			if isNegative {
@@ -205,11 +223,11 @@ func balancedEncode(target int64, base int, degrees []int64, sumDegrees []int64)
 			return coefficients[:bound+1], bound + 1
 		}
 
-		if target < degrees[index] {
+		if degrees[index].Cmp(target) >= 1 {
 			nextNegative = !nextNegative
-			target = degrees[index] - target
+			target.Sub(degrees[index], target)
 		} else {
-			target = target - degrees[index]
+			target.Sub(target, degrees[index])
 		}
 	}
 }
@@ -241,9 +259,11 @@ func rationalize(x float64, base int, precision int) (int64, int) {
 	num := float64(1)
 	pow := float64(precision)
 
-	err := 1.0 / (math.Pow(float64(base), pow+1))
+	err := 0.00001 // min float 64
 	qmin := x - err
 	qmax := x + err
+
+	fmt.Printf("[DEBUG] Encoding error is %f\n", err)
 
 	for {
 		// TODO: make more elegant, brute force right now...
@@ -265,7 +285,7 @@ func rationalize(x float64, base int, precision int) (int64, int) {
 // PolyEval evaluates a given polynomial using Horner's method
 func (p *Plaintext) PolyEval() *big.Float {
 
-	acc := big.NewFloat(0)
+	acc := big.NewFloat(0.0)
 	x := big.NewFloat(float64(p.Base))
 
 	for i := p.Degree - 1; i >= 0; i-- {
@@ -274,27 +294,34 @@ func (p *Plaintext) PolyEval() *big.Float {
 	}
 
 	if p.ScaleFactor != 0 {
-		float, _ := acc.Float64()
-		scale := math.Pow(float64(p.Base), float64(p.ScaleFactor))
-		return big.NewFloat(float / scale)
+		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Base)), big.NewInt(int64(p.ScaleFactor)), nil)
+		denom := big.NewFloat(0.0).SetInt(scale)
+		res := acc.Quo(acc, denom)
+
+		return res
 	}
 
 	return acc
 }
 
+func checkOverflow(x *big.Int) bool {
+	max := big.NewInt(9223372036854775807)
+	return x.Cmp(max) > 0
+}
+
 func (p *Plaintext) String() string {
 
-	// s := ""
-	// for i := 0; i < p.Degree; i++ {
+	s := ""
+	for i := 0; i < p.Degree; i++ {
 
-	// 	s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
+		s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
 
-	// 	if i < p.Degree-1 {
-	// 		s += " + "
-	// 	}
-	// }
+		if i < p.Degree-1 {
+			s += " + "
+		}
+	}
 
-	// return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
+	return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
 
-	return fmt.Sprintf("%s", p.PolyEval().String())
+	//return fmt.Sprintf("%s", p.PolyEval().String())
 }

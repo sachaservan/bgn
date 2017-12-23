@@ -18,9 +18,8 @@ type PublicKey struct {
 	G1            *pbc.Element // G1 group
 	P             *pbc.Element // generator of G1
 	Q             *pbc.Element
-	N             *big.Int     // product of two primes
-	T             *big.Int     // message space T
-	DT            *pbc.Element // encrypted q2-T
+	N             *big.Int // product of two primes
+	T             *big.Int // message space T
 	PolyBase      int
 	FPPrecision   int
 	Deterministic bool // whether or not the homomorphic operations are deterministic
@@ -33,7 +32,7 @@ type SecretKey struct {
 }
 
 // NewKeyGen creates a new public/private key pair of size bits
-func NewKeyGen(keyBits int, polyBase int, fpPrecision int, deterministic bool) (*PublicKey, *SecretKey, error) {
+func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpPrecision int, deterministic bool) (*PublicKey, *SecretKey, error) {
 
 	if keyBits < 16 {
 		panic("key bits must be >= 16 bits in length")
@@ -51,14 +50,17 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int, deterministic bool) (
 	// generate a new random prime q (this will be the secret key)
 	q2, err = rand.Prime(rand.Reader, keyBits)
 
-	T := big.NewInt(1000000000)
-
 	if err != nil {
 		return nil, nil, err
 	}
 
+	if q1.Cmp(T) < 0 || q2.Cmp(T) < 0 {
+		panic("Message space is greater than the group order!")
+	}
+
 	// compute the product of the primes
 	N = big.NewInt(0).Mul(q1, q2)
+	N.Mul(N, T)
 	params := pbc.GenerateA1(N)
 
 	if err != nil {
@@ -76,23 +78,27 @@ func NewKeyGen(keyBits int, polyBase int, fpPrecision int, deterministic bool) (
 	// is a "small" number s.t. p + 1 = l*n
 	l, err := parseLFromPBCParams(params)
 
-	// choose random point P in G1
+	// choose random point P in G which becomes a generator for G of order N
 	P = G1.Rand()
-	P.PowBig(P, l)
+	P.PowBig(P, big.NewInt(0).Mul(l, big.NewInt(4)))
 
 	// choose random Q in G1
 	Q = G1.NewFieldElement()
 	Q.PowBig(P, newCryptoRandom(N))
 	Q.PowBig(Q, q2)
+	Q.PowBig(Q, T)
 
+	// Make P a generate for the subgroup of order q1T
+	P.PowBig(P, q2)
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, P, Q, N, T, nil, polyBase, fpPrecision, deterministic}
-
-	DT := pk.encryptDeterministic(big.NewInt(0).Sub(q2, T)) // note: no point making this non-deterministic
-	pk.DT = DT
+	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, fpPrecision, deterministic}
 
 	// create secret key
 	sk := &SecretKey{q1, polyBase}
+
+	if err != nil {
+		println("Couldn't generate params!")
+	}
 
 	return pk, sk, err
 }
@@ -125,12 +131,11 @@ func (pk *PublicKey) AInv(ct *Ciphertext) *Ciphertext {
 		return pk.aInvL2(ct)
 	}
 
-	eT := pk.encrypt(pk.T)
 	degree := ct.Degree
 	result := make([]*pbc.Element, degree)
 
 	for i := degree - 1; i >= 0; i-- {
-		result[i] = pk.eSubElements(pk.eAddElements(pk.DT, eT), ct.Coefficients[i])
+		result[i] = pk.eSubElements(pk.encryptZero(), ct.Coefficients[i])
 	}
 
 	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
@@ -197,13 +202,11 @@ func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 
 func (pk *PublicKey) aInvL2(ct *Ciphertext) *Ciphertext {
 
-	eT := pk.encryptDeterministic(pk.T)
-
 	degree := ct.Degree
 	result := make([]*pbc.Element, degree)
 
 	for i := degree - 1; i >= 0; i-- {
-		result[i] = pk.eSubL2Elements(pk.toL2Element(pk.eAddElements(pk.DT, eT)), ct.Coefficients[i])
+		result[i] = pk.eSubL2Elements(pk.encryptZeroL2(), ct.Coefficients[i])
 	}
 
 	return &Ciphertext{result, ct.Degree, ct.ScaleFactor, ct.L2}
@@ -213,16 +216,16 @@ func (sk *SecretKey) decryptElement(el *pbc.Element, pk *PublicKey, failed bool)
 
 	gsk := pk.G1.NewFieldElement()
 	csk := pk.G1.NewFieldElement()
+
 	gsk.PowBig(pk.P, sk.Key)
 	csk.PowBig(el, sk.Key)
 
 	pt, err := pk.recoverMessageWithDL(gsk, csk, false)
+
 	if err != nil {
-		if failed {
-			panic("decryption failed twice. Message not recoverable. ")
-		}
-		return sk.decryptElement(pk.eSubElements(el, pk.DT), pk, true)
+		panic("could not find discrete log!")
 	}
+
 	return pt
 }
 
@@ -235,11 +238,9 @@ func (sk *SecretKey) decryptElementL2(el *pbc.Element, pk *PublicKey, failed boo
 	csk.PowBig(el, sk.Key)
 
 	pt, err := pk.recoverMessageWithDL(gsk, csk, true)
+
 	if err != nil {
-		if failed {
-			panic("decryption failed twice. Message not recoverable.")
-		}
-		return sk.decryptElementL2(pk.eSubL2Elements(el, pk.toL2Element(pk.DT)), pk, true)
+		panic("could not find discrete log!")
 	}
 
 	return pt
@@ -288,15 +289,20 @@ func (pk *PublicKey) eAddL2(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *C
 
 // EMultC multiplies a level 1 (non-multiplied) ciphertext with a plaintext constant
 // and returns the result
-func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
+func (pk *PublicKey) EMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 
 	if ct.L2 {
 		return pk.eMultCL2(ct, constant)
 	}
 
-	isNegative := constant < 0.0
+	return pk.eMultC(ct, constant)
+}
+
+func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
+
+	isNegative := constant.Cmp(big.NewFloat(0.0)) < 0
 	if isNegative {
-		constant *= -1
+		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
 	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
@@ -316,15 +322,7 @@ func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
 			index := i + k
 
 			coeff := zero.NewFieldElement()
-			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
-
-			if !pk.Deterministic {
-				r := newCryptoRandom(pk.N)
-				q := zero.NewFieldElement()
-				q.MulBig(pk.Q, r)
-				coeff.Mul(coeff, q)
-			}
-
+			coeff = pk.eMultCElement(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]), pk.Deterministic)
 			result[index] = pk.eAddElements(result[index], coeff)
 		}
 	}
@@ -340,11 +338,11 @@ func (pk *PublicKey) EMultC(ct *Ciphertext, constant float64) *Ciphertext {
 
 // EMultCL2 multiplies a level 2 (multiplied) ciphertext with a plaintext constant
 // and returns the result
-func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
+func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 
-	isNegative := constant < 0.0
+	isNegative := constant.Cmp(big.NewFloat(0.0)) < 0
 	if isNegative {
-		constant *= -1
+		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
 	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
@@ -362,15 +360,7 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
 			index := i + k
 
 			coeff := pk.Pairing.NewGT().NewFieldElement()
-			coeff.PowBig(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
-
-			if !pk.Deterministic {
-				r := newCryptoRandom(pk.N)
-				pair := pk.Pairing.NewGT().NewFieldElement().Pair(pk.Q, pk.Q)
-				pair.PowBig(pair, r)
-				coeff.Mul(coeff, pair)
-			}
-
+			coeff = pk.eMultCElementL2(ct.Coefficients[i], big.NewInt(poly.Coefficients[k]), pk.Deterministic)
 			result[index] = pk.eAddL2Elements(result[index], coeff)
 		}
 	}
@@ -382,6 +372,36 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant float64) *Ciphertext {
 	}
 
 	return product
+}
+
+func (pk *PublicKey) eMultCElement(el *pbc.Element, constant *big.Int, deterministic bool) *pbc.Element {
+
+	res := el.NewFieldElement()
+	res.PowBig(el, constant)
+
+	if deterministic {
+		r := newCryptoRandom(pk.N)
+		q := el.NewFieldElement()
+		q.MulBig(pk.Q, r)
+		res.Mul(res, q)
+	}
+
+	return res
+}
+
+func (pk *PublicKey) eMultCElementL2(el *pbc.Element, constant *big.Int, deterministic bool) *pbc.Element {
+
+	res := pk.Pairing.NewGT().NewFieldElement()
+	res.PowBig(el, constant)
+
+	if !pk.Deterministic {
+		r := newCryptoRandom(pk.N)
+		pair := pk.Pairing.NewGT().NewFieldElement().Pair(pk.Q, pk.Q)
+		pair.PowBig(pair, r)
+		res.Mul(res, pair)
+	}
+
+	return res
 }
 
 // EMult multiplies two level 1 (non-multiplied) ciphertext together and returns the result
@@ -418,7 +438,7 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 // MakeL2 moves a given ciphertext to the GT field
 func (pk *PublicKey) MakeL2(ct *Ciphertext) *Ciphertext {
 
-	one := pk.Encrypt(NewPlaintext(1, pk.PolyBase, pk.FPPrecision))
+	one := pk.Encrypt(NewPlaintext(big.NewFloat(1.0), pk.PolyBase, pk.FPPrecision))
 	return pk.EMult(one, ct)
 }
 
@@ -470,6 +490,7 @@ func (pk *PublicKey) recoverMessageWithDL(gsk *pbc.Element, csk *pbc.Element, l2
 
 	// find the discrete log with the kangaroo algorithm
 	m, err := pk.getDL(csk, gsk, l2)
+
 	threshold := big.NewInt(0).Div(pk.T, big.NewInt(2))
 	if err != nil {
 		return -1, err
