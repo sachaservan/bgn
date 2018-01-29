@@ -9,68 +9,23 @@ import (
 func main() {
 	printWelcome()
 
-	println("\n***Begin Executing Demo****\n")
+	keyBits := 512 // length of q1 and q2
+	polyBase := 3  // base for the ciphertext polynomial
 
-	keyBits := 35 // length of q1 and q2
-	polyBase := 3
-	fpPrecision := 2
-
-	runSanityCheck(keyBits, polyBase, fpPrecision)
-	// exampleArithmetic(keyBits, polyBase, fpPrecision)
-	// exampleMultiParty(5, keyBits, polyBase, fpPrecision)
-
-	examplePearsonsTestSimulation(2, keyBits, polyBase, fpPrecision, true)
-	exampleTTestSimulation(2, keyBits, polyBase, fpPrecision, true)
-
-	println("\n***End Executing Demo****\n")
+	runSanityCheck(keyBits, polyBase)
+	runArithmeticCheck(keyBits, polyBase)
 }
 
-func exampleMultiParty(numParties int, keyBits int, polyBase int, fpPrecision int) {
+func runArithmeticCheck(keyBits int, polyBase int) {
 
-	pk, sk, shares, _ := bgn.NewMPCKeyGen(numParties, keyBits, polyBase, fpPrecision, true)
-	blackboxMPC := bgn.NewBlackboxMPC(shares, pk, sk)
+	println("\n----------RUNNING ARITHMETIC TEST----------\n")
 
-	m1 := bgn.NewPlaintext(big.NewFloat(3.0), pk.PolyBase, pk.FPPrecision)
-	m2 := bgn.NewPlaintext(big.NewFloat(-3.0), pk.PolyBase, pk.FPPrecision)
-	c1 := pk.Encrypt(m1)
-	c2 := pk.Encrypt(m2)
-	c3 := pk.EAdd(c1, c2)
-	c4 := pk.EMult(c1, c2)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, true)
 
-	resultInv := blackboxMPC.MPCDecrypt(blackboxMPC.MPCEMInv(blackboxMPC.MPCEncrypt(pk.EMult(c1, c1))))
-	fmt.Printf("MPCINV 1/9 = E(%s)\n\n", resultInv.String())
-
-	return
-
-	resultAdd := blackboxMPC.MPCDecrypt(c3)
-	resultMult := blackboxMPC.MPCDecrypt(c4)
-	c5 := blackboxMPC.MPCEncrypt(c4)
-	c5 = pk.EMult(c5, c5)
-	c5 = pk.EMultC(c5, big.NewFloat(-1.0))
-	resultMult2 := sk.Decrypt(c5, pk)
-
-	c6 := blackboxMPC.MPCEncrypt(c5)
-	resultMult3 := sk.Decrypt(c6, pk)
-
-	c7 := blackboxMPC.MPCEMInv(c5)
-	resultDiv := sk.Decrypt(c7, pk)
-
-	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultAdd.String())
-	fmt.Printf("EMULT E(%s) ⊠ E(%s) = E(%s)\n\n", m1.String(), m2.String(), resultMult.String())
-	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s*(-1)) = E(%s)\n\n", resultMult.String(), resultMult.String(), resultMult2.String())
-	fmt.Printf("MPCEMULT E(%s) ⊠ E(%s) = E(%s)\n\n", resultMult2.String(), resultMult2.String(), resultMult3.String())
-	fmt.Printf("MPCEMINV 1.0/E(%s) = E(%s)\n\n", resultMult2.String(), resultDiv.String())
-
-}
-
-func exampleArithmetic(keyBits int, polyBase int, fpPrecision int) {
-
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, fpPrecision, true)
-
-	m1 := bgn.NewPlaintext(big.NewFloat(11.0), pk.PolyBase, pk.FPPrecision)
-	m2 := bgn.NewPlaintext(big.NewFloat(9.0), pk.PolyBase, pk.FPPrecision)
-	m3 := bgn.NewPlaintext(big.NewFloat(2.75), pk.PolyBase, pk.FPPrecision)
-	m4 := bgn.NewPlaintext(big.NewFloat(32.99), pk.PolyBase, pk.FPPrecision)
+	m1 := bgn.NewPlaintext(big.NewFloat(11.0), pk.PolyBase)
+	m2 := bgn.NewPlaintext(big.NewFloat(9.0), pk.PolyBase)
+	m3 := bgn.NewPlaintext(big.NewFloat(2.75), pk.PolyBase)
+	m4 := bgn.NewPlaintext(big.NewFloat(32.99), pk.PolyBase)
 
 	c1 := pk.Encrypt(m1)
 	c2 := pk.Encrypt(m2)
@@ -100,16 +55,19 @@ func exampleArithmetic(keyBits int, polyBase int, fpPrecision int) {
 	r6 := pk.EAdd(c1, c6)
 	fmt.Printf("EADD E(%s) ⊞ AINV(E(%s)) = E(%s)\n\n", m1, m4, sk.Decrypt(r6, pk).String())
 
+	fmt.Println("\n----------DONE----------")
+
 }
 
-func runSanityCheck(keyBits int, polyBase int, fpPrecision int) {
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, fpPrecision, true)
+func runSanityCheck(keyBits int, polyBase int) {
 
-	zero := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase, pk.FPPrecision))
-	one := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(1.0), pk.PolyBase, pk.FPPrecision))
-	negone := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(-1.0), pk.PolyBase, pk.FPPrecision))
+	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, true)
 
-	fmt.Println("*****RUNNING SANITY CHECK*******")
+	zero := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase))
+	one := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(1.0), pk.PolyBase))
+	negone := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(-1.0), pk.PolyBase))
+
+	fmt.Println("\n---------RUNNING SANITY CHECK----------")
 	fmt.Println("0+0 = " + sk.Decrypt(pk.EAdd(zero, zero), pk).String())
 	fmt.Println("0+1 = " + sk.Decrypt(pk.EAdd(zero, one), pk).String())
 	fmt.Println("1+1 = " + sk.Decrypt(pk.EAdd(one, one), pk).String())
@@ -131,28 +89,21 @@ func runSanityCheck(keyBits int, polyBase int, fpPrecision int) {
 	fmt.Println("1*-(0) = " + sk.Decrypt(pk.EMult(one, pk.AInv(zero)), pk).String())
 	fmt.Println("1*-(1) = " + sk.Decrypt(pk.EMult(one, pk.AInv(one)), pk).String())
 	fmt.Println("(-1)*-(1) = " + sk.Decrypt(pk.EMult(pk.AInv(one), pk.AInv(one)), pk).String())
-	fmt.Println("AINV((-1)*(-1)) = " + sk.Decrypt(pk.AInv(pk.EMult(pk.AInv(one), pk.AInv(one))), pk).String())
 
-	fmt.Println("*****DONE WITH SANITY CHECK*******")
+	fmt.Println("\n---------DONE----------")
 
 }
 
 func printWelcome() {
-	fmt.Println("BBBBBBBBBBBBBBBBB           GGGGGGGGGGGGGNNNNNNNN        NNNNNNNN")
-	fmt.Println("B::::::::::::::::B       GGG::::::::::::GN:::::::N       N::::::N")
-	fmt.Println("B::::::BBBBBB:::::B    GG:::::::::::::::GN::::::::N      N::::::N")
-	fmt.Println("BB:::::B     B:::::B  G:::::GGGGGGGG::::GN:::::::::N     N::::::N")
-	fmt.Println("  B::::B     B:::::B G:::::G       GGGGGGN::::::::::N    N::::::N")
-	fmt.Println("  B::::B     B:::::BG:::::G              N:::::::::::N   N::::::N")
-	fmt.Println("  B::::BBBBBB:::::B G:::::G              N:::::::N::::N  N::::::N")
-	fmt.Println("  B:::::::::::::BB  G:::::G    GGGGGGGGGGN::::::N N::::N N::::::N")
-	fmt.Println("  B::::BBBBBB:::::B G:::::G    G::::::::GN::::::N  N::::N:::::::N")
-	fmt.Println("  B::::B     B:::::BG:::::G    GGGGG::::GN::::::N   N:::::::::::N")
-	fmt.Println("  B::::B     B:::::BG:::::G        G::::GN::::::N    N::::::::::N")
-	fmt.Println("  B::::B     B:::::B G:::::G       G::::GN::::::N     N:::::::::N")
-	fmt.Println("BB:::::BBBBBB::::::B  G:::::GGGGGGGG::::GN::::::N      N::::::::N")
-	fmt.Println("B:::::::::::::::::B    GG:::::::::::::::GN::::::N       N:::::::N")
-	fmt.Println("B::::::::::::::::B       GGG::::::GGG:::GN::::::N        N::::::N")
-	fmt.Println("BBBBBBBBBBBBBBBBB           GGGGGG   GGGGNNNNNNNN         NNNNNNN")
-	fmt.Println("-----------------------------------------------------------------")
+	fmt.Println("====================================")
+	fmt.Println(" ____   _____ _   _ ")
+	fmt.Println("|  _ \\ / ____| \\ | |")
+	fmt.Println("| |_) | |  __|  \\| |")
+	fmt.Println("|  _ <| | |_ | . ` |")
+	fmt.Println("| |_) | |__| | |\\  |")
+	fmt.Println("|____/ \\_____|_| \\_|")
+
+	fmt.Println("Boneh Nissim Goh Cryptosystem in Go")
+	fmt.Println("====================================")
+
 }

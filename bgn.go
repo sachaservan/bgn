@@ -21,7 +21,6 @@ type PublicKey struct {
 	N             *big.Int // product of two primes
 	T             *big.Int // message space T
 	PolyBase      int
-	FPPrecision   int
 	Deterministic bool // whether or not the homomorphic operations are deterministic
 }
 
@@ -32,7 +31,7 @@ type SecretKey struct {
 }
 
 // NewKeyGen creates a new public/private key pair of size bits
-func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpPrecision int, deterministic bool) (*PublicKey, *SecretKey, error) {
+func NewKeyGen(keyBits int, T *big.Int, polyBase int, deterministic bool) (*PublicKey, *SecretKey, error) {
 
 	if keyBits < 16 {
 		panic("key bits must be >= 16 bits in length")
@@ -91,7 +90,7 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpPrecision int, determini
 	// Make P a generate for the subgroup of order q1T
 	P.PowBig(P, q2)
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, fpPrecision, deterministic}
+	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, deterministic}
 
 	// create secret key
 	sk := &SecretKey{q1, polyBase}
@@ -305,7 +304,7 @@ func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
-	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
+	poly := NewUnbalancedPlaintext(constant, pk.PolyBase)
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -345,7 +344,7 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
-	poly := NewUnbalancedPlaintext(constant, pk.PolyBase, pk.FPPrecision)
+	poly := NewUnbalancedPlaintext(constant, pk.PolyBase)
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -438,7 +437,7 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 // MakeL2 moves a given ciphertext to the GT field
 func (pk *PublicKey) MakeL2(ct *Ciphertext) *Ciphertext {
 
-	one := pk.Encrypt(NewPlaintext(big.NewFloat(1.0), pk.PolyBase, pk.FPPrecision))
+	one := pk.Encrypt(NewPlaintext(big.NewFloat(1.0), pk.PolyBase))
 	return pk.EMult(one, ct)
 }
 

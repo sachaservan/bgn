@@ -22,7 +22,7 @@ type Plaintext struct {
 
 // NewUnbalancedPlaintext generates an unbalanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewUnbalancedPlaintext(m *big.Float, b int, fpp int) *Plaintext {
+func NewUnbalancedPlaintext(m *big.Float, b int) *Plaintext {
 
 	if degreeTable == nil || computedBase != b {
 		computedBase = b
@@ -33,7 +33,7 @@ func NewUnbalancedPlaintext(m *big.Float, b int, fpp int) *Plaintext {
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
 		mFloat, _ := m.Float64()
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b, fpp)
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b)
 		mInt := big.NewInt(0)
 		m.Int(mInt)
 		mInt.Add(mInt, big.NewInt(numerator))
@@ -51,7 +51,7 @@ func NewUnbalancedPlaintext(m *big.Float, b int, fpp int) *Plaintext {
 
 // NewPlaintext generates an balanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewPlaintext(m *big.Float, b int, fpp int) *Plaintext {
+func NewPlaintext(m *big.Float, b int) *Plaintext {
 
 	if degreeTable == nil || computedBase != b {
 		degreeTable, degreeSumTable = computeDegreeTable(big.NewInt(int64(b)), degreeBound)
@@ -62,7 +62,7 @@ func NewPlaintext(m *big.Float, b int, fpp int) *Plaintext {
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
 
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b, fpp)
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b)
 		mInt := big.NewInt(0)
 		m.Int(mInt)
 		mInt.Add(mInt, big.NewInt(numerator))
@@ -241,7 +241,7 @@ func reverse(numbers []int64) []int64 {
 }
 
 // rationalize float x as a base b encoded polynomial and a scalefactor
-func rationalize(x float64, base int, precision int) (int64, int) {
+func rationalize(x float64, base int) (int64, int) {
 
 	factor := math.Floor(x)
 
@@ -257,13 +257,11 @@ func rationalize(x float64, base int, precision int) (int64, int) {
 	}
 
 	num := float64(1)
-	pow := float64(precision)
+	pow := float64(2)
 
 	err := 0.00001 // min float 64
 	qmin := x - err
 	qmax := x + err
-
-	fmt.Printf("[DEBUG] Encoding error is %f\n", err)
 
 	for {
 		// TODO: make more elegant, brute force right now...
@@ -305,23 +303,25 @@ func (p *Plaintext) PolyEval() *big.Float {
 }
 
 func checkOverflow(x *big.Int) bool {
-	max := big.NewInt(9223372036854775807)
+	max := big.NewInt(9223372036854775807) // max value of int64
 	return x.Cmp(max) > 0
 }
 
 func (p *Plaintext) String() string {
 
-	s := ""
-	for i := 0; i < p.Degree; i++ {
+	/* un-comment below for polynomial representation of the plaintext value */
 
-		s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
+	// s := ""
+	// for i := 0; i < p.Degree; i++ {
 
-		if i < p.Degree-1 {
-			s += " + "
-		}
-	}
+	// 	s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
 
-	return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
+	// 	if i < p.Degree-1 {
+	// 		s += " + "
+	// 	}
+	// }
 
-	//return fmt.Sprintf("%s", p.PolyEval().String())
+	// return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
+
+	return fmt.Sprintf("%s", p.PolyEval().String())
 }
