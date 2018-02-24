@@ -49,6 +49,8 @@ func (pk *PublicKey) ComputeDLCache(gsk *pbc.Element) {
 		cache.Store(aux.String(), res.Int64())
 		aux.Mul(aux, gsk)
 	}
+
+	usingCache = true
 }
 
 // obtain the discrete log in O(sqrt(T)) time using giant step baby step algorithm
