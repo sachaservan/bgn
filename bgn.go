@@ -20,8 +20,10 @@ type PublicKey struct {
 	Q             *pbc.Element
 	N             *big.Int // product of two primes
 	T             *big.Int // message space T
-	PolyBase      int
-	Deterministic bool // whether or not the homomorphic operations are deterministic
+	PolyBase      int      // ciphertext polynomial encoding base
+	FPScaleBase   int      // fixed point encoding scale base
+	FPPrecision   float64  // min error tolerance for fixed point encoding
+	Deterministic bool     // whether or not the homomorphic operations are deterministic
 }
 
 // SecretKey used for decryption of ciphertexts
@@ -31,7 +33,7 @@ type SecretKey struct {
 }
 
 // NewKeyGen creates a new public/private key pair of size bits
-func NewKeyGen(keyBits int, T *big.Int, polyBase int, deterministic bool) (*PublicKey, *SecretKey, error) {
+func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpScaleBase int, fpPrecision float64, deterministic bool) (*PublicKey, *SecretKey, error) {
 
 	if keyBits < 16 {
 		panic("key bits must be >= 16 bits in length")
@@ -90,16 +92,16 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, deterministic bool) (*Publ
 	// Make P a generate for the subgroup of order q1T
 	P.PowBig(P, q2)
 	// create public key with the generated groups
-	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, deterministic}
+	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, fpScaleBase, fpPrecision, deterministic}
 
 	// create secret key
 	sk := &SecretKey{q1, polyBase}
 
 	if err != nil {
-		println("Couldn't generate params!")
+		panic("Couldn't generate key params!")
 	}
 
-	computeDegreeTable(big.NewInt(int64(polyBase)), pk.T.BitLen())
+	pk.computeEncodingTable()
 
 	return pk, sk, err
 }
@@ -218,7 +220,7 @@ func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 		plaintextCoeffs[i] = pk.DecodeSign(sk.decryptElement(ct.Coefficients[i], pk, false)).Int64()
 	}
 
-	return &Plaintext{plaintextCoeffs, size, pk.PolyBase, ct.ScaleFactor}
+	return &Plaintext{pk, plaintextCoeffs, size, ct.ScaleFactor}
 }
 
 func (pk *PublicKey) aInvL2(ct *Ciphertext) *Ciphertext {
@@ -277,7 +279,7 @@ func (sk *SecretKey) decryptL2(ct *Ciphertext, pk *PublicKey) *Plaintext {
 		plaintextCoeffs[i] = pk.DecodeSign(sk.decryptElementL2(ct.Coefficients[i], pk, false)).Int64()
 	}
 
-	return &Plaintext{plaintextCoeffs, ct.Degree, pk.PolyBase, ct.ScaleFactor}
+	return &Plaintext{pk, plaintextCoeffs, ct.Degree, ct.ScaleFactor}
 }
 
 // EAddL2 adds two level 2 (multiplied) ciphertexts together and returns the result
@@ -326,7 +328,7 @@ func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
-	poly := NewUnbalancedPlaintext(constant, pk.PolyBase)
+	poly := pk.NewUnbalancedPlaintext(constant)
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -366,7 +368,7 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
-	poly := NewUnbalancedPlaintext(constant, pk.PolyBase)
+	poly := pk.NewUnbalancedPlaintext(constant)
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -465,7 +467,7 @@ func (pk *PublicKey) EMultElements(el1 *pbc.Element, el2 *pbc.Element) *pbc.Elem
 // MakeL2 moves a given ciphertext to the GT field
 func (pk *PublicKey) MakeL2(ct *Ciphertext) *Ciphertext {
 
-	one := pk.Encrypt(NewPlaintext(big.NewFloat(1.0), pk.PolyBase))
+	one := pk.Encrypt(pk.NewPlaintext(big.NewFloat(1.0)))
 	return pk.EMult(one, ct)
 }
 
@@ -590,24 +592,8 @@ func (pk *PublicKey) alignCiphertexts(ct1 *Ciphertext, ct2 *Ciphertext, level2 b
 
 	if ct1.ScaleFactor > ct2.ScaleFactor {
 		diff := ct1.ScaleFactor - ct2.ScaleFactor
-		newCoeffs := make([]*pbc.Element, ct2.Degree+diff)
 
-		i := 0
-		for ; i < diff; i++ {
-			if level2 {
-				newCoeffs[i] = pk.encryptZeroL2()
-			} else {
-				newCoeffs[i] = pk.encryptZero()
-			}
-		}
-
-		for ; i < ct2.Degree+diff; i++ {
-			newCoeffs[i] = ct2.Coefficients[i-diff]
-
-		}
-
-		ct2.Degree += diff
-		ct2.Coefficients = newCoeffs
+		ct2 = pk.EMultC(ct2, big.NewFloat(math.Pow(float64(pk.FPScaleBase), float64(diff))))
 		ct2.ScaleFactor = ct1.ScaleFactor
 
 	} else if ct2.ScaleFactor > ct1.ScaleFactor {

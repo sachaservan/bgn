@@ -7,25 +7,27 @@ import (
 )
 
 func main() {
+
 	printWelcome()
 
 	keyBits := 512 // length of q1 and q2
-	polyBase := 3  // base for the ciphertext polynomial
+	messageSpace := big.NewInt(1021)
+	polyBase := 3 // base for the ciphertext polynomial
+	fpScaleBase := 2
+	fpPrecision := 0.1
 
-	runSanityCheck(keyBits, polyBase)
-	runArithmeticCheck(keyBits, polyBase)
+	//runSanityCheck(keyBits, polyBase)
+	runArithmeticCheck(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision)
 }
 
-func runArithmeticCheck(keyBits int, polyBase int) {
+func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
 
-	println("\n----------RUNNING ARITHMETIC TEST----------\n")
+	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, true)
-
-	m1 := bgn.NewPlaintext(big.NewFloat(11.0), pk.PolyBase)
-	m2 := bgn.NewPlaintext(big.NewFloat(9.0), pk.PolyBase)
-	m3 := bgn.NewPlaintext(big.NewFloat(2.75), pk.PolyBase)
-	m4 := bgn.NewPlaintext(big.NewFloat(32.99), pk.PolyBase)
+	m1 := pk.NewPlaintext(big.NewFloat(11.0))
+	m2 := pk.NewPlaintext(big.NewFloat(9.0))
+	m3 := pk.NewPlaintext(big.NewFloat(2.75))
+	m4 := pk.NewPlaintext(big.NewFloat(2.99))
 
 	c1 := pk.Encrypt(m1)
 	c2 := pk.Encrypt(m2)
@@ -33,7 +35,14 @@ func runArithmeticCheck(keyBits int, polyBase int) {
 	c4 := pk.Encrypt(m4)
 	c6 := pk.AInv(c4)
 
-	r1 := pk.EAdd(c1, c2)
+	println("\n----------RUNNING ARITHMETIC TEST----------\n")
+
+	fmt.Printf("c1 = E(%s)\n", sk.Decrypt(c1, pk).String())
+	fmt.Printf("c2 = E(%s)\n", sk.Decrypt(c2, pk).String())
+	fmt.Printf("c3 = E(%s)\n", sk.Decrypt(c3, pk).String())
+	fmt.Printf("c4 = E(%s)\n", sk.Decrypt(c4, pk).String())
+
+	r1 := pk.EAdd(c1, c4)
 	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m2, sk.Decrypt(r1, pk).String())
 
 	const1 := big.NewFloat(88.0)
@@ -61,11 +70,11 @@ func runArithmeticCheck(keyBits int, polyBase int) {
 
 func runSanityCheck(keyBits int, polyBase int) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1048609), polyBase, true)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, 2, 1, true)
 
-	zero := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase))
-	one := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(1.0), pk.PolyBase))
-	negone := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(-1.0), pk.PolyBase))
+	zero := pk.Encrypt(pk.NewPlaintext(big.NewFloat(0.0)))
+	one := pk.Encrypt(pk.NewPlaintext(big.NewFloat(1.0)))
+	negone := pk.Encrypt(pk.NewPlaintext(big.NewFloat(-1.0)))
 
 	fmt.Println("\n---------RUNNING SANITY CHECK----------")
 	fmt.Println("0+0 = " + sk.Decrypt(pk.EAdd(zero, zero), pk).String())
@@ -89,8 +98,7 @@ func runSanityCheck(keyBits int, polyBase int) {
 	fmt.Println("1*-(0) = " + sk.Decrypt(pk.EMult(one, pk.AInv(zero)), pk).String())
 	fmt.Println("1*-(1) = " + sk.Decrypt(pk.EMult(one, pk.AInv(one)), pk).String())
 	fmt.Println("(-1)*-(1) = " + sk.Decrypt(pk.EMult(pk.AInv(one), pk.AInv(one)), pk).String())
-
-	fmt.Println("\n---------DONE----------")
+	fmt.Println("---------DONE----------")
 
 }
 

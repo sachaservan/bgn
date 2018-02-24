@@ -14,47 +14,46 @@ const degreeBound = 128 // note: 3^64 > Int64 hence this is a generous upper bou
 
 // Plaintext struct holds data related to the polynomial encoded plaintext
 type Plaintext struct {
+	Pk           *PublicKey
 	Coefficients []int64 // coefficients in the plaintext or ciphertext poly
 	Degree       int
-	Base         int
 	ScaleFactor  int
 }
 
 // NewUnbalancedPlaintext generates an unbalanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewUnbalancedPlaintext(m *big.Float, b int) *Plaintext {
+func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 
-	if degreeTable == nil || computedBase != b {
-		computedBase = b
-		degreeTable, degreeSumTable = computeDegreeTable(big.NewInt(int64(b)), degreeBound)
+	if degreeTable == nil {
+		panic("Encoding tables not computed!")
 	}
 
 	mFloat, _ := m.Float64()
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
 		mFloat, _ := m.Float64()
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b)
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), pk.FPScaleBase, pk.FPPrecision)
 		mInt := big.NewInt(0)
 		m.Int(mInt)
 		mInt.Add(mInt, big.NewInt(numerator))
 
-		coeffs, degree := unbalancedEncode(mInt, b, degreeTable, degreeSumTable)
-		return &Plaintext{coeffs, degree, b, scaleFactor}
+		coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+		return &Plaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	// m is an big.Int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
-	coeffs, degree := unbalancedEncode(mInt, b, degreeTable, degreeSumTable)
-	return &Plaintext{coeffs, degree, b, 0}
+	coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+	return &Plaintext{pk, coeffs, degree, 0}
 }
 
 // NewPlaintext generates an balanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func NewPlaintext(m *big.Float, b int) *Plaintext {
+func (pk *PublicKey) NewPlaintext(m *big.Float) *Plaintext {
 
-	if degreeTable == nil || computedBase != b {
-		degreeTable, degreeSumTable = computeDegreeTable(big.NewInt(int64(b)), degreeBound)
+	if degreeTable == nil {
+		panic("Encoding tables not computed!")
 	}
 
 	mFloat, _ := m.Float64()
@@ -62,27 +61,30 @@ func NewPlaintext(m *big.Float, b int) *Plaintext {
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
 
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), b)
+		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), pk.FPScaleBase, pk.FPPrecision)
 		mInt := big.NewInt(0)
 		m.Int(mInt)
+		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
 
-		// fmt.Printf("Encoded rational approximation to %f is (%d/%d^%d) = %f\n", m, numerator, b, scaleFactor, float64(numerator)/math.Pow(float64(b), float64(scaleFactor)))
-		coeffs, degree := balancedEncode(mInt, b, degreeTable, degreeSumTable)
-		return &Plaintext{coeffs, degree, b, scaleFactor}
+		coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+		return &Plaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	//m is an int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
-	coeffs, degree := balancedEncode(mInt, b, degreeTable, degreeSumTable)
-	return &Plaintext{coeffs, degree, b, 0}
+	coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+	return &Plaintext{pk, coeffs, degree, 0}
 }
 
-func computeDegreeTable(base *big.Int, bound int) ([]*big.Int, []*big.Int) {
+func (pk *PublicKey) computeEncodingTable() {
 
-	degreeTable := make([]*big.Int, bound)
-	degreeSumTable := make([]*big.Int, bound)
+	base := big.NewInt(int64(pk.PolyBase))
+	bound := degreeBound
+
+	degreeTable = make([]*big.Int, bound)
+	degreeSumTable = make([]*big.Int, bound)
 
 	sum := big.NewInt(1)
 	degreeSumTable[0] = big.NewInt(1)
@@ -95,8 +97,6 @@ func computeDegreeTable(base *big.Int, bound int) ([]*big.Int, []*big.Int) {
 		degreeSumTable[i] = big.NewInt(0)
 		degreeSumTable[i].Set(sum)
 	}
-
-	return degreeTable, degreeSumTable
 }
 
 // compute the closest degree to the target value
@@ -241,7 +241,7 @@ func reverse(numbers []int64) []int64 {
 }
 
 // rationalize float x as a base b encoded polynomial and a scalefactor
-func rationalize(x float64, base int) (int64, int) {
+func rationalize(x float64, base int, precision float64) (int64, int) {
 
 	factor := math.Floor(x)
 
@@ -259,16 +259,14 @@ func rationalize(x float64, base int) (int64, int) {
 	num := float64(1)
 	pow := float64(1)
 
-	err := 0.00001 // min float 64
-	qmin := x - err
-	qmax := x + err
+	qmin := x - precision
+	qmax := x + precision
 
 	for {
 		// TODO: make more elegant, brute force right now...
 		denom := math.Pow(float64(base), pow)
 		rat := num / denom
 		if rat <= qmax && rat >= qmin {
-			fmt.Printf("pow is %d\n", int(pow))
 			return int64(factor*denom + num), int(pow)
 		}
 
@@ -285,7 +283,7 @@ func rationalize(x float64, base int) (int64, int) {
 func (p *Plaintext) PolyEval() *big.Float {
 
 	acc := big.NewFloat(0.0)
-	x := big.NewFloat(float64(p.Base))
+	x := big.NewFloat(float64(p.Pk.PolyBase))
 
 	for i := p.Degree - 1; i >= 0; i-- {
 		acc.Mul(acc, x)
@@ -293,7 +291,7 @@ func (p *Plaintext) PolyEval() *big.Float {
 	}
 
 	if p.ScaleFactor != 0 {
-		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Base)), big.NewInt(int64(p.ScaleFactor)), nil)
+		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
 		denom := big.NewFloat(0.0).SetInt(scale)
 		res := acc.Quo(acc, denom)
 

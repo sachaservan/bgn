@@ -14,6 +14,7 @@ var tableG1 sync.Map
 var tableGT sync.Map
 var cache sync.Map
 var usingCache = false
+var tablesComputed = false
 
 func computeTableG1(gen *pbc.Element, bound int64) {
 
@@ -37,6 +38,18 @@ func computeTableGT(gen *pbc.Element, bound int64) {
 	}
 }
 
+// PrecomputeTables builds the maps necessary
+// for the giant step, baby step algorithm
+func (pk *PublicKey) PrecomputeTables(gen *pbc.Element) {
+
+	// sqrt of the largest possible message
+	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
+
+	// pre-compute the tables for the giant steps
+	computeTableGT(gen, bound)
+	computeTableG1(gen, bound)
+}
+
 // ComputeDLCache builds a table of all possible discrete log values in
 // the message space. Note: only use if using a relatively small value for T
 func (pk *PublicKey) ComputeDLCache(gsk *pbc.Element) {
@@ -50,7 +63,7 @@ func (pk *PublicKey) ComputeDLCache(gsk *pbc.Element) {
 		aux.Mul(aux, gsk)
 	}
 
-	usingCache = true
+	tablesComputed = true
 }
 
 // obtain the discrete log in O(sqrt(T)) time using giant step baby step algorithm
@@ -67,15 +80,11 @@ func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.In
 		fmt.Println("[DEBUG]: Discrete log cache miss.")
 	}
 
-	// sqrt of the largest possible message
-	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
+	if !tablesComputed {
+		pk.PrecomputeTables(gsk)
+	}
 
-	// pre-compute the tables for the giant steps
-	//if l2 && tableGT == nil {
-	computeTableGT(gsk, bound)
-	//} else if tableG1 == nil {
-	computeTableG1(gsk, bound)
-	//}
+	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
 
 	aux := csk.NewFieldElement()
 
