@@ -257,7 +257,7 @@ func rationalize(x float64, base int) (int64, int) {
 	}
 
 	num := float64(1)
-	pow := float64(2)
+	pow := float64(1)
 
 	err := 0.00001 // min float 64
 	qmin := x - err
@@ -268,6 +268,7 @@ func rationalize(x float64, base int) (int64, int) {
 		denom := math.Pow(float64(base), pow)
 		rat := num / denom
 		if rat <= qmax && rat >= qmin {
+			fmt.Printf("pow is %d\n", int(pow))
 			return int64(factor*denom + num), int(pow)
 		}
 

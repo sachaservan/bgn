@@ -61,7 +61,7 @@ func runArithmeticCheck(keyBits int, polyBase int) {
 
 func runSanityCheck(keyBits int, polyBase int) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, true)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1048609), polyBase, true)
 
 	zero := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(0.0), pk.PolyBase))
 	one := pk.Encrypt(bgn.NewPlaintext(big.NewFloat(1.0), pk.PolyBase))
