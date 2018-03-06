@@ -12,7 +12,9 @@ import (
 
 var tableG1 sync.Map
 var tableGT sync.Map
-var cache sync.Map
+var cacheG1 sync.Map
+var cacheGT sync.Map
+
 var usingCache = false
 var tablesComputed = false
 
@@ -21,7 +23,7 @@ func computeTableG1(gen *pbc.Element, bound int64) {
 	aux := gen.NewFieldElement()
 	aux.Set(gen)
 
-	for j := int64(0); j < bound; j++ {
+	for j := int64(0); j <= bound; j++ {
 		tableG1.Store(aux.String(), j)
 		aux.Mul(aux, gen)
 	}
@@ -32,7 +34,7 @@ func computeTableGT(gen *pbc.Element, bound int64) {
 	aux := gen.NewFieldElement()
 	aux.Set(gen)
 
-	for j := int64(0); j < bound; j++ {
+	for j := int64(0); j <= bound; j++ {
 		tableGT.Store(aux.String(), j)
 		aux.Mul(aux, gen)
 	}
@@ -40,48 +42,71 @@ func computeTableGT(gen *pbc.Element, bound int64) {
 
 // PrecomputeTables builds the maps necessary
 // for the giant step, baby step algorithm
-func (pk *PublicKey) PrecomputeTables(gen *pbc.Element) {
+func (pk *PublicKey) PrecomputeTables(genG1 *pbc.Element, genGT *pbc.Element) {
 
 	// sqrt of the largest possible message
-	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
+	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64())))) + 1
 
 	// pre-compute the tables for the giant steps
-	computeTableGT(gen, bound)
-	computeTableG1(gen, bound)
+	computeTableGT(genGT, bound)
+	computeTableG1(genG1, bound)
+
+	tablesComputed = true
 }
 
 // ComputeDLCache builds a table of all possible discrete log values in
 // the message space. Note: only use if using a relatively small value for T
-func (pk *PublicKey) ComputeDLCache(gsk *pbc.Element) {
+func (pk *PublicKey) ComputeDLCache(gskG1 *pbc.Element, gskGT *pbc.Element) {
 
-	aux := gsk.NewFieldElement()
-	aux.Set(gsk)
-	for i := 1; i <= int(pk.T.Int64()); i++ {
+	bound := pk.T.Int64()
 
-		res := big.NewInt(int64(i))
-		cache.Store(aux.String(), res.Int64())
-		aux.Mul(aux, gsk)
+	auxG1 := gskG1.NewFieldElement()
+	cacheG1.Store(auxG1.String(), big.NewInt(0))
+	auxG1.Set(gskG1)
+
+	auxGT := gskGT.NewFieldElement()
+	cacheGT.Store(auxGT.String(), big.NewInt(0))
+	auxGT.Set(gskGT)
+
+	for i := int64(1); i < bound; i++ {
+
+		// G1 store
+		cacheG1.Store(auxG1.String(), big.NewInt(i))
+		// GT store
+		cacheGT.Store(auxGT.String(), big.NewInt(i))
+
+		auxG1 = auxG1.Mul(auxG1, gskG1)
+		auxGT = auxGT.Mul(auxGT, gskGT)
 	}
 
-	tablesComputed = true
+	usingCache = true
 }
 
 // obtain the discrete log in O(sqrt(T)) time using giant step baby step algorithm
 func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.Int, error) {
 
 	if usingCache {
-		value, hit := cache.Load(csk.String())
-		if hit {
-			if v, ok := value.(int64); ok {
-				fmt.Println("[DEBUG]: Discrete log cache hit.")
-				return big.NewInt(v), nil
+
+		if l2 {
+			value, hit := cacheGT.Load(csk.String())
+			if hit {
+				if v, ok := value.(*big.Int); ok {
+					return big.NewInt(0).Set(v), nil
+				}
+			}
+		} else {
+			value, hit := cacheG1.Load(csk.String())
+			if hit {
+				if v, ok := value.(*big.Int); ok {
+					return big.NewInt(0).Set(v), nil
+				}
 			}
 		}
 		fmt.Println("[DEBUG]: Discrete log cache miss.")
 	}
 
 	if !tablesComputed {
-		pk.PrecomputeTables(gsk)
+		panic("DL tables not computed!")
 	}
 
 	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
@@ -90,41 +115,42 @@ func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.In
 
 	gamma := gsk.NewFieldElement()
 	gamma.Set(gsk)
-	gamma.PowBig(gamma, big.NewInt(0))
+	gamma.MulBig(gamma, big.NewInt(0))
 
 	aux.Set(csk)
 	aux.Mul(aux, gamma)
 
 	gamma.Set(gsk)
-	gamma.PowBig(gamma, big.NewInt(bound))
+	gamma.MulBig(gamma, big.NewInt(bound))
 
-	var val int64
+	var val *big.Int
 	var found bool
 
-	for i := int64(0); i < bound; i++ {
+	for i := int64(0); i <= bound; i++ {
 
 		found = false
-		val = 0
+		val = big.NewInt(0)
+
 		if l2 {
 			value, hit := tableGT.Load(aux.String())
 			if v, ok := value.(int64); ok {
-				val = v
+				val = big.NewInt(v)
 				found = hit
 			}
 
 		} else {
 			value, hit := tableG1.Load(aux.String())
 			if v, ok := value.(int64); ok {
-				val = v
+				val = big.NewInt(v)
 				found = hit
 			}
 		}
 
 		if found {
-			dl := big.NewInt(i*bound + val + 1)
+			dl := big.NewInt(i*bound + val.Int64() + 1)
+
 			return dl, nil
 		}
-
 		aux.Div(aux, gamma)
 	}
 

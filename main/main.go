@@ -2,7 +2,9 @@ package main
 
 import (
 	"bgn"
+	"crypto/rand"
 	"fmt"
+	"log"
 	"math/big"
 )
 
@@ -14,17 +16,41 @@ func main() {
 	messageSpace := big.NewInt(1021)
 	polyBase := 3 // base for the ciphertext polynomial
 	fpScaleBase := 2
-	fpPrecision := 0.1
+	fpPrecision := 0.0001
 
 	//runSanityCheck(keyBits, polyBase)
 	runArithmeticCheck(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision)
+}
+
+// generates a new random number < max
+func newCryptoRandom(max *big.Int) *big.Int {
+	rand, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		log.Println(err)
+	}
+
+	return rand
 }
 
 func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
 
 	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
 
-	m1 := pk.NewPlaintext(big.NewFloat(11.0))
+	genG1 := pk.P.NewFieldElement()
+	genG1.PowBig(pk.P, sk.Key)
+
+	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	genGT.PowBig(genGT, sk.Key)
+	pk.PrecomputeTables(genG1, genGT)
+	//pk.ComputeDLCache(genG1, genGT)
+
+	// var wg sync.WaitGroup
+	// wg.Add(100)
+	// for i := 0; i < 100; i++ {
+
+	// 	go func() {
+	// 		defer wg.Done()
+	m1 := pk.NewPlaintext(big.NewFloat(0.0111))
 	m2 := pk.NewPlaintext(big.NewFloat(9.0))
 	m3 := pk.NewPlaintext(big.NewFloat(2.75))
 	m4 := pk.NewPlaintext(big.NewFloat(2.99))
@@ -65,6 +91,10 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	fmt.Printf("EADD E(%s) ⊞ AINV(E(%s)) = E(%s)\n\n", m1, m4, sk.Decrypt(r6, pk).String())
 
 	fmt.Println("\n----------DONE----------")
+	// 	}()
+	// }
+
+	// wg.Wait()
 
 }
 

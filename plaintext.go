@@ -37,6 +37,8 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 		m.Int(mInt)
 		mInt.Add(mInt, big.NewInt(numerator))
 
+		fmt.Printf("encoded %f as %s/%s\n", m, mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
+
 		coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
 		return &Plaintext{pk, coeffs, degree, scaleFactor}
 	}
@@ -66,6 +68,8 @@ func (pk *PublicKey) NewPlaintext(m *big.Float) *Plaintext {
 		m.Int(mInt)
 		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
+
+		fmt.Printf("encoded %f as %s/%s\n", m, mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 
 		coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
 		return &Plaintext{pk, coeffs, degree, scaleFactor}
@@ -267,6 +271,13 @@ func rationalize(x float64, base int, precision float64) (int64, int) {
 		denom := math.Pow(float64(base), pow)
 		rat := num / denom
 		if rat <= qmax && rat >= qmin {
+
+			// a hacky way to get the min ratio
+			for (int(num) % base) == 0 {
+				num = num / float64(base)
+				pow--
+			}
+			denom := math.Pow(float64(base), pow)
 			return int64(factor*denom + num), int(pow)
 		}
 
@@ -290,13 +301,13 @@ func (p *Plaintext) PolyEval() *big.Float {
 		acc.Add(acc, big.NewFloat(float64(p.Coefficients[i])))
 	}
 
-	if p.ScaleFactor != 0 {
-		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
-		denom := big.NewFloat(0.0).SetInt(scale)
-		res := acc.Quo(acc, denom)
+	// if p.ScaleFactor != 0 {
+	// 	scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
+	// 	denom := big.NewFloat(0.0).SetInt(scale)
+	// 	res := acc.Quo(acc, denom)
 
-		return res
-	}
+	// 	return res
+	// }
 
 	return acc
 }
