@@ -2,7 +2,6 @@ package bgn
 
 import (
 	"errors"
-	"fmt"
 	"math"
 	"math/big"
 	"sync"
@@ -12,8 +11,6 @@ import (
 
 var tableG1 sync.Map
 var tableGT sync.Map
-var cacheG1 sync.Map
-var cacheGT sync.Map
 
 var usingCache = false
 var tablesComputed = false
@@ -54,56 +51,8 @@ func (pk *PublicKey) PrecomputeTables(genG1 *pbc.Element, genGT *pbc.Element) {
 	tablesComputed = true
 }
 
-// ComputeDLCache builds a table of all possible discrete log values in
-// the message space. Note: only use if using a relatively small value for T
-func (pk *PublicKey) ComputeDLCache(gskG1 *pbc.Element, gskGT *pbc.Element) {
-
-	bound := pk.T.Int64()
-
-	auxG1 := gskG1.NewFieldElement()
-	cacheG1.Store(auxG1.String(), big.NewInt(0))
-	auxG1.Set(gskG1)
-
-	auxGT := gskGT.NewFieldElement()
-	cacheGT.Store(auxGT.String(), big.NewInt(0))
-	auxGT.Set(gskGT)
-
-	for i := int64(1); i < bound; i++ {
-
-		// G1 store
-		cacheG1.Store(auxG1.String(), big.NewInt(i))
-		// GT store
-		cacheGT.Store(auxGT.String(), big.NewInt(i))
-
-		auxG1 = auxG1.Mul(auxG1, gskG1)
-		auxGT = auxGT.Mul(auxGT, gskGT)
-	}
-
-	usingCache = true
-}
-
 // obtain the discrete log in O(sqrt(T)) time using giant step baby step algorithm
 func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.Int, error) {
-
-	if usingCache {
-
-		if l2 {
-			value, hit := cacheGT.Load(csk.String())
-			if hit {
-				if v, ok := value.(*big.Int); ok {
-					return big.NewInt(0).Set(v), nil
-				}
-			}
-		} else {
-			value, hit := cacheG1.Load(csk.String())
-			if hit {
-				if v, ok := value.(*big.Int); ok {
-					return big.NewInt(0).Set(v), nil
-				}
-			}
-		}
-		fmt.Println("[DEBUG]: Discrete log cache miss.")
-	}
 
 	if !tablesComputed {
 		panic("DL tables not computed!")

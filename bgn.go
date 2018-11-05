@@ -61,7 +61,6 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpScaleBase int, fpPrecisi
 
 	// compute the product of the primes
 	N = big.NewInt(0).Mul(q1, q2)
-	N.Mul(N, T)
 	params := pbc.GenerateA1(N)
 
 	if err != nil {
@@ -83,13 +82,11 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpScaleBase int, fpPrecisi
 	P = G1.Rand()
 	P.PowBig(P, big.NewInt(0).Mul(l, big.NewInt(4)))
 	// Make P a generate for the subgroup of order q1T
-	P.PowBig(P, q2)
 
 	// choose random Q in G1
 	Q = G1.NewFieldElement()
 	Q.PowBig(P, newCryptoRandom(N))
 	Q.PowBig(Q, q2)
-	Q.PowBig(Q, T)
 
 	// create public key with the generated groups
 	pk := &PublicKey{pairing, G1, P, Q, N, T, polyBase, fpScaleBase, fpPrecision, deterministic}
@@ -196,16 +193,6 @@ func (pk *PublicKey) EAdd(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Cip
 	return &Ciphertext{result, degree, ct1.ScaleFactor, ct1.L2}
 }
 
-func (pk *PublicKey) DecodeSign(m *big.Int) *big.Int {
-
-	threshold := big.NewInt(0).Div(pk.T, big.NewInt(2))
-	if m.Cmp(threshold) >= 1 {
-		m.Sub(m, pk.T)
-	}
-
-	return m
-}
-
 // Decrypt the given ciphertext
 func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 
@@ -217,7 +204,7 @@ func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) *Plaintext {
 	plaintextCoeffs := make([]int64, size)
 
 	for i := 0; i < ct.Degree; i++ {
-		plaintextCoeffs[i] = pk.DecodeSign(sk.DecryptElement(ct.Coefficients[i], pk, false)).Int64()
+		plaintextCoeffs[i] = sk.DecryptElement(ct.Coefficients[i], pk, false).Int64()
 	}
 
 	return &Plaintext{pk, plaintextCoeffs, size, ct.ScaleFactor}
@@ -245,7 +232,12 @@ func (sk *SecretKey) DecryptElement(el *pbc.Element, pk *PublicKey, failed bool)
 
 	pt, err := pk.RecoverMessageWithDL(gsk, csk, false)
 
-	if err != nil {
+	if err != nil && !failed {
+		elNeg := pk.AInvElement(el)
+		return big.NewInt(0).Mul(big.NewInt(-1), sk.DecryptElement(elNeg, pk, true))
+	}
+
+	if err != nil && failed {
 		panic("could not find discrete log!")
 	}
 
@@ -262,6 +254,11 @@ func (sk *SecretKey) DecryptElementL2(el *pbc.Element, pk *PublicKey, failed boo
 
 	pt, err := pk.RecoverMessageWithDL(gsk, csk, true)
 
+	if err != nil && !failed {
+		elNeg := pk.AInvElementL2(el)
+		return big.NewInt(0).Mul(big.NewInt(-1), sk.DecryptElementL2(elNeg, pk, true))
+	}
+
 	if err != nil {
 		panic("could not find discrete log!")
 	}
@@ -276,7 +273,7 @@ func (sk *SecretKey) decryptL2(ct *Ciphertext, pk *PublicKey) *Plaintext {
 	plaintextCoeffs := make([]int64, size)
 
 	for i := 0; i < ct.Degree; i++ {
-		plaintextCoeffs[i] = pk.DecodeSign(sk.DecryptElementL2(ct.Coefficients[i], pk, false)).Int64()
+		plaintextCoeffs[i] = sk.DecryptElementL2(ct.Coefficients[i], pk, false).Int64()
 	}
 
 	return &Plaintext{pk, plaintextCoeffs, ct.Degree, ct.ScaleFactor}

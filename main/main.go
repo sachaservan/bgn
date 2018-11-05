@@ -15,10 +15,23 @@ func main() {
 	keyBits := 512 // length of q1 and q2
 	messageSpace := big.NewInt(1021)
 	polyBase := 3 // base for the ciphertext polynomial
-	fpScaleBase := 2
+	fpScaleBase := 3
 	fpPrecision := 0.0001
 
-	//runSanityCheck(keyBits, polyBase)
+	// pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
+	// genG1 := pk.P.NewFieldElement()
+	// genG1.PowBig(pk.P, sk.Key)
+
+	// genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	// genGT.PowBig(genGT, sk.Key)
+	// pk.PrecomputeTables(genG1, genGT)
+
+	// c1 := pk.EncryptElement(big.NewInt(3))
+	// c2 := pk.EncryptElement(big.NewInt(3))
+	// c3 := pk.EMultElements(c1, c2)
+
+	// println(sk.DecryptElementL2(c3, pk, false).String())
+	runSanityCheck(keyBits, polyBase)
 	runArithmeticCheck(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision)
 }
 
@@ -42,14 +55,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
 	genGT.PowBig(genGT, sk.Key)
 	pk.PrecomputeTables(genG1, genGT)
-	//pk.ComputeDLCache(genG1, genGT)
 
-	// var wg sync.WaitGroup
-	// wg.Add(100)
-	// for i := 0; i < 100; i++ {
-
-	// 	go func() {
-	// 		defer wg.Done()
 	m1 := pk.NewPlaintext(big.NewFloat(0.0111))
 	m2 := pk.NewPlaintext(big.NewFloat(9.0))
 	m3 := pk.NewPlaintext(big.NewFloat(2.75))
@@ -90,17 +96,20 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	r6 := pk.EAdd(c1, c6)
 	fmt.Printf("EADD E(%s) ⊞ AINV(E(%s)) = E(%s)\n\n", m1, m4, sk.Decrypt(r6, pk).String())
 
-	fmt.Println("\n----------DONE----------")
-	// 	}()
-	// }
-
-	// wg.Wait()
+	fmt.Println("\n----------DONE----------\n")
 
 }
 
 func runSanityCheck(keyBits int, polyBase int) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, 2, 1, true)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, 3, 2, true)
+
+	genG1 := pk.P.NewFieldElement()
+	genG1.PowBig(pk.P, sk.Key)
+
+	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	genGT.PowBig(genGT, sk.Key)
+	pk.PrecomputeTables(genG1, genGT)
 
 	zero := pk.Encrypt(pk.NewPlaintext(big.NewFloat(0.0)))
 	one := pk.Encrypt(pk.NewPlaintext(big.NewFloat(1.0)))
@@ -128,7 +137,7 @@ func runSanityCheck(keyBits int, polyBase int) {
 	fmt.Println("1*-(0) = " + sk.Decrypt(pk.EMult(one, pk.AInv(zero)), pk).String())
 	fmt.Println("1*-(1) = " + sk.Decrypt(pk.EMult(one, pk.AInv(one)), pk).String())
 	fmt.Println("(-1)*-(1) = " + sk.Decrypt(pk.EMult(pk.AInv(one), pk.AInv(one)), pk).String())
-	fmt.Println("---------DONE----------")
+	fmt.Println("\n---------DONE----------\n")
 
 }
 

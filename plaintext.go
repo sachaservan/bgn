@@ -301,13 +301,13 @@ func (p *Plaintext) PolyEval() *big.Float {
 		acc.Add(acc, big.NewFloat(float64(p.Coefficients[i])))
 	}
 
-	// if p.ScaleFactor != 0 {
-	// 	scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
-	// 	denom := big.NewFloat(0.0).SetInt(scale)
-	// 	res := acc.Quo(acc, denom)
+	if p.ScaleFactor != 0 {
+		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
+		denom := big.NewFloat(0.0).SetInt(scale)
+		res := acc.Quo(acc, denom)
 
-	// 	return res
-	// }
+		return res
+	}
 
 	return acc
 }
@@ -318,20 +318,6 @@ func checkOverflow(x *big.Int) bool {
 }
 
 func (p *Plaintext) String() string {
-
-	/* un-comment below for polynomial representation of the plaintext value */
-
-	// s := ""
-	// for i := 0; i < p.Degree; i++ {
-
-	// 	s += fmt.Sprintf("%d*%d^%d", p.Coefficients[i], p.Base, i)
-
-	// 	if i < p.Degree-1 {
-	// 		s += " + "
-	// 	}
-	// }
-
-	// return fmt.Sprintf("%s [%s] {%d}", p.PolyEval().String(), s, p.ScaleFactor)
 
 	return fmt.Sprintf("%s", p.PolyEval().String())
 }
