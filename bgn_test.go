@@ -273,8 +273,8 @@ func TestMult(t *testing.T) {
 	genGT.PowBig(genGT, sk.Key)
 	pk.PrecomputeTables(genG1, genGT)
 
-	f1 := big.NewFloat(100.1)
-	f2 := big.NewFloat(41.2)
+	f1 := big.NewFloat(1.1)
+	f2 := big.NewFloat(40.2)
 	p1 := pk.NewPlaintext(f1)
 	p2 := pk.NewPlaintext(f2)
 	c1 := pk.Encrypt(p1)
