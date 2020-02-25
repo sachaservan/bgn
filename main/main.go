@@ -137,7 +137,7 @@ func runSanityCheck(keyBits int, polyBase int) {
 	fmt.Println("1*-(0) = " + sk.Decrypt(pk.EMult(one, pk.AInv(zero)), pk).String())
 	fmt.Println("1*-(1) = " + sk.Decrypt(pk.EMult(one, pk.AInv(one)), pk).String())
 	fmt.Println("(-1)*-(1) = " + sk.Decrypt(pk.EMult(pk.AInv(one), pk.AInv(one)), pk).String())
-	fmt.Println("\n---------DONE----------\n")
+	fmt.Println("\n---------DONE----------")
 
 }
 
@@ -150,7 +150,7 @@ func printWelcome() {
 	fmt.Println("| |_) | |__| | |\\  |")
 	fmt.Println("|____/ \\_____|_| \\_|")
 
-	fmt.Println("Boneh Nissim Goh Cryptosystem in Go")
+	fmt.Println("Boneh Goh Nissim Cryptosystem in Go")
 	fmt.Println("====================================")
 
 }
