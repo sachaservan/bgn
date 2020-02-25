@@ -37,8 +37,6 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
 
-		fmt.Printf("encoded %f as %s/%s\n", m, mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
-
 		coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
 		return &Plaintext{pk, coeffs, degree, scaleFactor}
 	}
@@ -68,8 +66,6 @@ func (pk *PublicKey) NewPlaintext(m *big.Float) *Plaintext {
 		m.Int(mInt)
 		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
-
-		fmt.Printf("encoded %f as %s/%s\n", m, mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 
 		coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
 		return &Plaintext{pk, coeffs, degree, scaleFactor}
