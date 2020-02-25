@@ -42,6 +42,15 @@ After installing, you may need to rebuild the search path for libraries:
 $ cd bgn
 $ make install && make build && make run
 ```
+
+#### Testing BGN
+```sh
+$ cd bgn
+$ make install && make build
+$ go test
+$ go test -bench 
+```
+
 # Disclaimer
-**None of the cryptography used in this project was verified by experts and is intended to be used for research purposes only. Do not use this code when security guarantees are required.**
+**None of the cryptography used in this project was verified by experts. The code is intended to be used for research purposes only. Do not use this code when security guarantees are required.**
 
