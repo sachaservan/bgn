@@ -31,10 +31,10 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 	mFloat, _ := m.Float64()
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
-		mFloat, _ := m.Float64()
 		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), pk.FPScaleBase, pk.FPPrecision)
 		mInt := big.NewInt(0)
 		m.Int(mInt)
+		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
 
 		fmt.Printf("encoded %f as %s/%s\n", m, mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
@@ -43,7 +43,7 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 		return &Plaintext{pk, coeffs, degree, scaleFactor}
 	}
 
-	// m is an big.Int
+	// m is a big.Int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
 	coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)

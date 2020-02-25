@@ -47,7 +47,7 @@ func newCryptoRandom(max *big.Int) *big.Int {
 
 func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, false)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
 
 	genG1 := pk.P.NewFieldElement()
 	genG1.PowBig(pk.P, sk.Key)
@@ -77,7 +77,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	r1 := pk.EAdd(c1, c4)
 	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m4, sk.Decrypt(r1, pk).String())
 
-	const1 := big.NewFloat(88.0)
+	const1 := big.NewFloat(10.0)
 	r2 := pk.EMultC(c2, const1)
 	fmt.Printf("EMULTC E(%s) ⊠ %f = E(%s)\n\n", m2, const1, sk.Decrypt(r2, pk).String())
 

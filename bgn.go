@@ -377,7 +377,9 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
+	pk.mu.Lock()
 	poly := pk.NewUnbalancedPlaintext(constant)
+	pk.mu.Unlock()
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -387,6 +389,7 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		result[i] = pk.Pairing.NewGT().NewFieldElement()
 	}
 
+	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for i := ct.Degree - 1; i >= 0; i-- {
 		for k := poly.Degree - 1; k >= 0; k-- {
@@ -395,8 +398,10 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 			go func(index int, coeff1 *pbc.Element, c *big.Int) {
 				defer wg.Done()
 				coeff := pk.Pairing.NewGT().NewFieldElement()
-				coeff = pk.EMultCElementL2(coeff, c)
-				result[index] = pk.EAddL2Elements(coeff1, coeff)
+				mu.Lock()
+				coeff = pk.EMultCElementL2(coeff1, c)
+				result[index] = pk.EAddL2Elements(result[index], coeff)
+				mu.Unlock()
 			}(index, ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
 		}
 	}
