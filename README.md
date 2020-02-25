@@ -48,7 +48,7 @@ $ make install && make build && make run
 $ cd bgn
 $ make install && make build
 $ go test
-$ go test -bench 
+$ go test -bench=.
 ```
 
 # Disclaimer
