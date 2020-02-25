@@ -475,6 +475,7 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 	}
 	wg.Wait()
 
+	var mu sync.Mutex
 	for i := ct1.Degree - 1; i >= 0; i-- {
 		for k := ct2.Degree - 1; k >= 0; k-- {
 			wg.Add(1)
@@ -482,7 +483,9 @@ func (pk *PublicKey) EMult(ct1 *Ciphertext, ct2 *Ciphertext) *Ciphertext {
 			go func(index int, coeff1, coeff2 *pbc.Element) {
 				defer wg.Done()
 				coeff := pk.EMultElements(coeff1, coeff2)
+				mu.Lock()
 				result[index] = pk.EAddL2Elements(result[index], coeff)
+				mu.Unlock()
 			}(index, ct1.Coefficients[i], ct2.Coefficients[k])
 		}
 	}
