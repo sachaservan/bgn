@@ -2,9 +2,7 @@ package main
 
 import (
 	"bgn"
-	"crypto/rand"
 	"fmt"
-	"log"
 	"math/big"
 )
 
@@ -18,31 +16,8 @@ func main() {
 	fpScaleBase := 3
 	fpPrecision := 0.0001
 
-	// pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
-	// genG1 := pk.P.NewFieldElement()
-	// genG1.PowBig(pk.P, sk.Key)
-
-	// genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	// genGT.PowBig(genGT, sk.Key)
-	// pk.PrecomputeTables(genG1, genGT)
-
-	// c1 := pk.EncryptElement(big.NewInt(3))
-	// c2 := pk.EncryptElement(big.NewInt(3))
-	// c3 := pk.EMultElements(c1, c2)
-
-	// println(sk.DecryptElementL2(c3, pk, false).String())
 	runSanityCheck(keyBits, polyBase)
 	runArithmeticCheck(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision)
-}
-
-// generates a new random number < max
-func newCryptoRandom(max *big.Int) *big.Int {
-	rand, err := rand.Int(rand.Reader, max)
-	if err != nil {
-		log.Println(err)
-	}
-
-	return rand
 }
 
 func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
