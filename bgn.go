@@ -176,26 +176,20 @@ func (pk *PublicKey) EAdd(ciphertext1 *Ciphertext, ciphertext2 *Ciphertext) *Cip
 	degree := int(math.Max(float64(ct1.Degree), float64(ct2.Degree)))
 	result := make([]*pbc.Element, degree)
 
-	var wg sync.WaitGroup
-	for i := 0; i < degree; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+	for i := degree - 1; i >= 0; i-- {
 
-			if ct2.Degree > i && ct1.Degree > i {
-				result[i] = pk.EAddElements(ct1.Coefficients[i], ct2.Coefficients[i])
-			} else {
-				if i >= ct2.Degree {
-					result[i] = ct1.Coefficients[i]
-				}
-				if i >= ct1.Degree {
-					result[i] = ct2.Coefficients[i]
-				}
-			}
-		}(i)
+		if i >= ct2.Degree {
+			result[i] = ct1.Coefficients[i]
+			continue
+		}
+
+		if i >= ct1.Degree {
+			result[i] = ct2.Coefficients[i]
+			continue
+		}
+
+		result[i] = pk.EAddElements(ct1.Coefficients[i], ct2.Coefficients[i])
 	}
-
-	wg.Wait()
 
 	return &Ciphertext{result, degree, ct1.ScaleFactor, ct1.L2}
 }
@@ -332,7 +326,9 @@ func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		constant.Mul(constant, big.NewFloat(-1.0))
 	}
 
+	pk.mu.Lock()
 	poly := pk.NewUnbalancedPlaintext(constant)
+	pk.mu.Unlock()
 
 	degree := ct.Degree + poly.Degree
 	result := make([]*pbc.Element, degree)
@@ -344,6 +340,7 @@ func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 		result[i] = zero
 	}
 
+	var mu sync.Mutex // mutex for addition
 	var wg sync.WaitGroup
 	for i := ct.Degree - 1; i >= 0; i-- {
 		for k := poly.Degree - 1; k >= 0; k-- {
@@ -352,8 +349,10 @@ func (pk *PublicKey) eMultC(ct *Ciphertext, constant *big.Float) *Ciphertext {
 			go func(index int, coeff1 *pbc.Element, c *big.Int) {
 				defer wg.Done()
 				coeff := zero.NewFieldElement()
-				coeff = pk.EMultCElement(coeff, c)
+				mu.Lock()
+				coeff = pk.EMultCElement(coeff1, c)
 				result[index] = pk.EAddElements(result[index], coeff)
+				mu.Unlock()
 			}(index, ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
 		}
 	}
@@ -396,8 +395,8 @@ func (pk *PublicKey) eMultCL2(ct *Ciphertext, constant *big.Float) *Ciphertext {
 			go func(index int, coeff1 *pbc.Element, c *big.Int) {
 				defer wg.Done()
 				coeff := pk.Pairing.NewGT().NewFieldElement()
-				coeff = pk.EMultCElementL2(coeff1, c)
-				result[index] = pk.EAddL2Elements(result[index], coeff)
+				coeff = pk.EMultCElementL2(coeff, c)
+				result[index] = pk.EAddL2Elements(coeff1, coeff)
 			}(index, ct.Coefficients[i], big.NewInt(poly.Coefficients[k]))
 		}
 	}

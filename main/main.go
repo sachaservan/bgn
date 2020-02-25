@@ -47,7 +47,7 @@ func newCryptoRandom(max *big.Int) *big.Int {
 
 func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
 
-	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
+	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, false)
 
 	genG1 := pk.P.NewFieldElement()
 	genG1.PowBig(pk.P, sk.Key)
@@ -57,7 +57,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	pk.PrecomputeTables(genG1, genGT)
 
 	m1 := pk.NewPlaintext(big.NewFloat(0.0111))
-	m2 := pk.NewPlaintext(big.NewFloat(9.0))
+	m2 := pk.NewPlaintext(big.NewFloat(9.1))
 	m3 := pk.NewPlaintext(big.NewFloat(2.75))
 	m4 := pk.NewPlaintext(big.NewFloat(2.99))
 
@@ -75,7 +75,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	fmt.Printf("c4 = E(%s)\n", sk.Decrypt(c4, pk).String())
 
 	r1 := pk.EAdd(c1, c4)
-	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m2, sk.Decrypt(r1, pk).String())
+	fmt.Printf("EADD E(%s) ⊞ E(%s) = E(%s)\n\n", m1, m4, sk.Decrypt(r1, pk).String())
 
 	const1 := big.NewFloat(88.0)
 	r2 := pk.EMultC(c2, const1)
@@ -96,7 +96,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 	r6 := pk.EAdd(c1, c6)
 	fmt.Printf("EADD E(%s) ⊞ AINV(E(%s)) = E(%s)\n\n", m1, m4, sk.Decrypt(r6, pk).String())
 
-	fmt.Println("\n----------DONE----------\n")
+	fmt.Println("\n----------DONE----------")
 
 }
 
