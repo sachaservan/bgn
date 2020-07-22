@@ -1,7 +1,6 @@
 package bgn
 
 import (
-	"fmt"
 	"math/big"
 )
 
@@ -23,9 +22,5 @@ func NewDecryptionProof(v *big.Int, r *big.Int) *DecryptionProof {
 func (pk *PublicKey) CheckDecryptionProof(ct *Ciphertext, proof *DecryptionProof) bool {
 
 	res := pk.EncryptWithRandomness(proof.Value, proof.Randomness)
-
-	fmt.Println(ct.C)
-	fmt.Println(res.C)
-
 	return ct.C.Equals(res.C)
 }
