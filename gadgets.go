@@ -19,8 +19,7 @@ func NewDecryptionProof(v *big.Int, r *big.Int) *DecryptionProof {
 	}
 }
 
-// Decrypt uses the secret key to recover the encrypted value
-// throws an error if decryption fails
+// CheckDecryptionProof outputs true if the proof is valid for the ciphertext ct
 func (pk *PublicKey) CheckDecryptionProof(ct *Ciphertext, proof *DecryptionProof) bool {
 
 	res := pk.EncryptWithRandomness(proof.Value, proof.Randomness)
