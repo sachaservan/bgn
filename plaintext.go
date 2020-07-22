@@ -12,17 +12,28 @@ var computedBase int
 
 const degreeBound = 128 // note: 3^64 > Int64 hence this is a generous upper bound
 
+// PolyPlaintext is a polynomial encoded value
+type PolyPlaintext struct {
+	Pk           *PublicKey
+	Coefficients []*big.Int // coefficients in the polynomial
+	Degree       int        // degree of the polynomial
+	ScaleFactor  int
+}
+
 // Plaintext struct holds data related to the polynomial encoded plaintext
 type Plaintext struct {
-	Pk           *PublicKey
-	Coefficients []int64 // coefficients in the plaintext or ciphertext poly
-	Degree       int
-	ScaleFactor  int
+	Pk    *PublicKey
+	Value *big.Int
+}
+
+// NewPlaintext constructs a plaintext for the value m
+func (pk *PublicKey) NewPlaintext(m *big.Int) *Plaintext {
+	return &Plaintext{pk, m}
 }
 
 // NewUnbalancedPlaintext generates an unbalanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
+func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *PolyPlaintext {
 
 	if degreeTable == nil {
 		panic("Encoding tables not computed!")
@@ -38,19 +49,19 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *Plaintext {
 		mInt.Add(mInt, big.NewInt(numerator))
 
 		coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
-		return &Plaintext{pk, coeffs, degree, scaleFactor}
+		return &PolyPlaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	// m is a big.Int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
 	coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
-	return &Plaintext{pk, coeffs, degree, 0}
+	return &PolyPlaintext{pk, coeffs, degree, 0}
 }
 
-// NewPlaintext generates an balanced base b encoded polynomial representation of m
+// NewPolyPlaintext generates an balanced base b encoded polynomial representation of m
 // fpp is the starting floating point scale factor which determines the precision
-func (pk *PublicKey) NewPlaintext(m *big.Float) *Plaintext {
+func (pk *PublicKey) NewPolyPlaintext(m *big.Float) *PolyPlaintext {
 
 	if degreeTable == nil {
 		panic("Encoding tables not computed!")
@@ -68,14 +79,14 @@ func (pk *PublicKey) NewPlaintext(m *big.Float) *Plaintext {
 		mInt.Add(mInt, big.NewInt(numerator))
 
 		coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
-		return &Plaintext{pk, coeffs, degree, scaleFactor}
+		return &PolyPlaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	//m is an int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
 	coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
-	return &Plaintext{pk, coeffs, degree, 0}
+	return &PolyPlaintext{pk, coeffs, degree, 0}
 }
 
 func (pk *PublicKey) computeEncodingTable() {
@@ -125,13 +136,22 @@ func degree(target *big.Int, sums []*big.Int, bound int, balanced bool) int {
 	return -1
 }
 
-func unbalancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]int64, int) {
+func toBigIntArray(values []int64) []*big.Int {
+	res := make([]*big.Int, len(values))
+	for i, v := range values {
+		res[i] = big.NewInt(v)
+	}
+
+	return res
+}
+
+func unbalancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]*big.Int, int) {
 
 	// special case
 	if target.Cmp(big.NewInt(0)) == 0 {
 		coefficients := make([]int64, 1)
 		coefficients[0] = 0
-		return coefficients, 1
+		return toBigIntArray(coefficients), 1
 	}
 
 	if target.Cmp(big.NewInt(0)) < 0 {
@@ -166,20 +186,20 @@ func unbalancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees 
 		}
 
 		if value.Cmp(target) == 0 {
-			return coefficients[:bound+1], bound + 1
+			return toBigIntArray(coefficients[:bound+1]), bound + 1
 		}
 
 		target.Sub(target, value)
 	}
 }
 
-func balancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]int64, int) {
+func balancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []*big.Int) ([]*big.Int, int) {
 
 	// special case
 	if target.Int64() == 0 {
 		coefficients := make([]int64, 1)
 		coefficients[0] = 0
-		return coefficients, 1
+		return toBigIntArray(coefficients), 1
 	}
 
 	isNegative := big.NewInt(0).Cmp(target) > 0
@@ -220,7 +240,7 @@ func balancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []
 				}
 			}
 
-			return coefficients[:bound+1], bound + 1
+			return toBigIntArray(coefficients[:bound+1]), bound + 1
 		}
 
 		if degrees[index].Cmp(target) >= 1 {
@@ -287,14 +307,14 @@ func rationalize(x float64, base int, precision float64) (int64, int) {
 }
 
 // PolyEval evaluates a given polynomial using Horner's method
-func (p *Plaintext) PolyEval() *big.Float {
+func (p *PolyPlaintext) PolyEval() *big.Float {
 
 	acc := big.NewFloat(0.0)
 	x := big.NewFloat(float64(p.Pk.PolyBase))
 
 	for i := p.Degree - 1; i >= 0; i-- {
 		acc.Mul(acc, x)
-		acc.Add(acc, big.NewFloat(float64(p.Coefficients[i])))
+		acc.Add(acc, new(big.Float).SetInt(p.Coefficients[i]))
 	}
 
 	if p.ScaleFactor != 0 {
@@ -313,7 +333,7 @@ func checkOverflow(x *big.Int) bool {
 	return x.Cmp(max) > 0
 }
 
-func (p *Plaintext) String() string {
+func (p *PolyPlaintext) String() string {
 
 	return fmt.Sprintf("%s", p.PolyEval().String())
 }

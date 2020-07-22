@@ -4,20 +4,54 @@ import (
 	"github.com/Nik-U/pbc"
 )
 
+// Ciphertext is a vanilla BGN ciphertext encrypting a value with
+// a ScaleFactor fixed-point encoding precision
 type Ciphertext struct {
-	Coefficients []*pbc.Element // coefficients in the plaintext or ciphertext poly
-	Degree       int
-	ScaleFactor  int
-	L2           bool // whether ciphertext is level2
+	C  *pbc.Element // coefficients in the plaintext or ciphertext poly
+	L2 bool         // indicates whether ciphertext is atlevel2
+}
+
+// PolyCiphertext is an encoding of a value in a
+// a given base (specified in the public key)
+// such an encoding is useful for reducing the impact of modular wrap around as
+// the encrypted values grow
+type PolyCiphertext struct {
+	Coefficients []*Ciphertext // coefficients in the plaintext or ciphertext poly
+	Degree       int           // degree of the polynomial s
+	ScaleFactor  int           // scaling factor for fixed-point encoding
+	L2           bool          // indicates whether ciphertext is atlevel2
+}
+
+// Copy returns a copy of the given ciphertext
+func (ct *PolyCiphertext) Copy() *PolyCiphertext {
+	return &PolyCiphertext{ct.Coefficients, ct.Degree, ct.ScaleFactor, ct.L2}
+}
+
+// NewPolyCiphertext generates a new polynmial ciphertext with specified coefficients and parameters
+func NewPolyCiphertext(coefficients []*Ciphertext, degree int, scaleFactor int, l2 bool) *PolyCiphertext {
+	return &PolyCiphertext{coefficients, degree, scaleFactor, l2}
+}
+
+// NewCiphertext generates a BGN ciphertext with specified coefficients and parameters
+func NewCiphertext(c *pbc.Element, scaleFactor int, l2 bool) *Ciphertext {
+	return &Ciphertext{c, l2}
 }
 
 // Copy returns a copy of the given ciphertext
 func (ct *Ciphertext) Copy() *Ciphertext {
-	return &Ciphertext{ct.Coefficients, ct.Degree, ct.ScaleFactor, ct.L2}
+	return &Ciphertext{ct.C, ct.L2}
 }
 
-// NewCiphertext generates a  new ciphertext...duh
-func NewCiphertext(coefficients []*pbc.Element, degree int, scaleFactor int, l2 bool) *Ciphertext {
+func (ct *Ciphertext) String() string {
+	return ct.C.String() + "\n"
+}
 
-	return &Ciphertext{coefficients, degree, scaleFactor, l2}
+func (ct *PolyCiphertext) String() string {
+
+	str := ""
+	for _, coeff := range ct.Coefficients {
+		str += coeff.C.String() + "\n"
+	}
+
+	return str
 }
