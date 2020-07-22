@@ -16,7 +16,7 @@ func main() {
 	fpScaleBase := 3
 	fpPrecision := 0.0001
 
-	runSanityCheck(keyBits, polyBase)
+	runSimpleCheck(keyBits, polyBase)
 	runArithmeticCheck(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision)
 }
 
@@ -75,7 +75,7 @@ func runArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScal
 
 }
 
-func runSanityCheck(keyBits int, polyBase int) {
+func runSimpleCheck(keyBits int, polyBase int) {
 
 	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, 3, 2, true)
 
