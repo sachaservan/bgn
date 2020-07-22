@@ -1,12 +1,12 @@
 all: build
 
 run:
-	go build -o example cmd/*.go
+	go build -o cmd/example cmd/*.go
 	./example
 build: 
-	go build -o example cmd/*.go
+	go build -o cmd/example cmd/*.go
 clean: 
-	rm example
+	rm cmd/example
 install: 
 	go install
 test: 
