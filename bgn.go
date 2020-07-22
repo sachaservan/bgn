@@ -49,6 +49,10 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpScaleBase int, fpPrecisi
 	// generate a new random prime r
 	q1, err := rand.Prime(rand.Reader, keyBits)
 
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// generate a new random prime q (this will be the secret key)
 	q2, err = rand.Prime(rand.Reader, keyBits)
 

@@ -12,7 +12,6 @@ import (
 var tableG1 sync.Map
 var tableGT sync.Map
 
-var usingCache = false
 var tablesComputed = false
 
 func computeTableG1(gen *pbc.Element, bound int64) {

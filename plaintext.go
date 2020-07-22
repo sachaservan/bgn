@@ -1,14 +1,12 @@
 package bgn
 
 import (
-	"fmt"
 	"math"
 	"math/big"
 )
 
 var degreeSumTable []*big.Int
 var degreeTable []*big.Int
-var computedBase int
 
 const degreeBound = 128 // note: 3^64 > Int64 hence this is a generous upper bound
 
@@ -252,14 +250,6 @@ func balancedEncode(target *big.Int, base int, degrees []*big.Int, sumDegrees []
 	}
 }
 
-func reverse(numbers []int64) []int64 {
-	for i := 0; i < len(numbers)/2; i++ {
-		j := len(numbers) - i - 1
-		numbers[i], numbers[j] = numbers[j], numbers[i]
-	}
-	return numbers
-}
-
 // rationalize float x as a base b encoded polynomial and a scalefactor
 func rationalize(x float64, base int, precision float64) (int64, int) {
 
@@ -328,12 +318,6 @@ func (p *PolyPlaintext) PolyEval() *big.Float {
 	return acc
 }
 
-func checkOverflow(x *big.Int) bool {
-	max := big.NewInt(9223372036854775807) // max value of int64
-	return x.Cmp(max) > 0
-}
-
 func (p *PolyPlaintext) String() string {
-
-	return fmt.Sprintf("%s", p.PolyEval().String())
+	return p.PolyEval().String()
 }

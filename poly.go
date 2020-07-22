@@ -100,9 +100,8 @@ func (pk *PublicKey) MultConstPoly(ct *PolyCiphertext, constant *big.Float) *Pol
 			index := i + k
 			go func(index int, c1 *Ciphertext, c *big.Int) {
 				defer wg.Done()
-				coeff := zero.Copy()
 				mu.Lock()
-				coeff = pk.MultConst(c1, c)
+				coeff := pk.MultConst(c1, c)
 				result[index] = pk.Add(result[index], coeff)
 				mu.Unlock()
 			}(index, ct.Coefficients[i], poly.Coefficients[k])
