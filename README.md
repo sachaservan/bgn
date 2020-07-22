@@ -1,3 +1,6 @@
+![Go](https://github.com/sachaservan/bgn/workflows/Go/badge.svg)
+![golangci-lint](https://github.com/sachaservan/bgn/workflows/golangci-lint/badge.svg)
+
 # BGN
 Boneh Goh Nissim (BGN) crypto system implementation in Golang.
 
