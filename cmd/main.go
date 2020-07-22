@@ -1,9 +1,10 @@
 package main
 
 import (
-	"bgn"
 	"fmt"
 	"math/big"
+
+	"github.com/sachaservan/bgn"
 )
 
 func main() {
