@@ -104,6 +104,15 @@ func NewKeyGen(keyBits int, T *big.Int, polyBase int, fpScaleBase int, fpPrecisi
 	return pk, sk, err
 }
 
+// SetupDecryption generates the necessary values for decryption
+func (pk *PublicKey) SetupDecryption(sk *SecretKey) {
+	genG1 := pk.P.NewFieldElement()
+	genG1.PowBig(pk.P, sk.Key)
+	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	genGT.PowBig(genGT, sk.Key)
+	pk.PrecomputeTables(genG1, genGT)
+}
+
 // Decrypt uses the secret key to recover the encrypted value
 // throws an error if decryption fails
 func (sk *SecretKey) Decrypt(ct *Ciphertext, pk *PublicKey) (*big.Int, error) {
@@ -236,11 +245,16 @@ func (pk *PublicKey) EncryptDeterministic(x *big.Int) *Ciphertext {
 
 // Encrypt returns a ciphertext encrypting x
 func (pk *PublicKey) Encrypt(x *big.Int) *Ciphertext {
+	r := newCryptoRandom(pk.N)
+	return pk.EncryptWithRandomness(x, r)
+}
+
+// EncryptWithRandomness encrypts a value using provided randomness r
+func (pk *PublicKey) EncryptWithRandomness(x *big.Int, r *big.Int) *Ciphertext {
 
 	pk.mu.Lock()
 	G := pk.G1.NewFieldElement()
 	G.PowBig(pk.P, x)
-	r := newCryptoRandom(pk.N)
 	H := pk.G1.NewFieldElement()
 	H.PowBig(pk.Q, r)
 	C := pk.G1.NewFieldElement()

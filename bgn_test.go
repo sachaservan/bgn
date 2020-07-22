@@ -129,12 +129,6 @@ func TestEncodeUnbalancedPoly(t *testing.T) {
 func TestEncodeEncryptDecryptPoly(t *testing.T) {
 	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
 
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
-
 	f1 := big.NewFloat(9.123)
 	p1 := pk.NewPolyPlaintext(f1)
 	c1 := pk.EncryptPoly(p1)
@@ -147,12 +141,7 @@ func TestEncodeEncryptDecryptPoly(t *testing.T) {
 
 func TestAddPoly(t *testing.T) {
 	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	pk.SetupDecryption(sk)
 
 	f1 := big.NewFloat(0.1)
 	f2 := big.NewFloat(4.2)
@@ -171,12 +160,7 @@ func TestAddPoly(t *testing.T) {
 
 func TestAddPolyL2(t *testing.T) {
 	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	pk.SetupDecryption(sk)
 
 	f1 := big.NewFloat(50.1)
 	f2 := big.NewFloat(41.2)
@@ -197,12 +181,7 @@ func TestAddPolyL2(t *testing.T) {
 
 func TestMultConstPoly(t *testing.T) {
 	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	pk.SetupDecryption(sk)
 
 	f1 := big.NewFloat(9.13)
 	f2 := big.NewFloat(4.12)
@@ -228,12 +207,7 @@ func TestMultConstPoly(t *testing.T) {
 
 func TestMultPoly(t *testing.T) {
 	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	pk.SetupDecryption(sk)
 
 	f1 := big.NewFloat(1.1)
 	f2 := big.NewFloat(40.2)
