@@ -90,7 +90,7 @@ func runSimpleCheck(keyBits int, polyBase int) {
 	one := pk.Encrypt(pk.NewPlaintext(big.NewFloat(1.0)))
 	negone := pk.Encrypt(pk.NewPlaintext(big.NewFloat(-1.0)))
 
-	fmt.Println("\n---------RUNNING SANITY CHECK----------")
+	fmt.Println("\n---------RUNNING BASIC CHECK----------")
 	fmt.Println("0+0 = " + sk.Decrypt(pk.EAdd(zero, zero), pk).String())
 	fmt.Println("0+1 = " + sk.Decrypt(pk.EAdd(zero, one), pk).String())
 	fmt.Println("1+1 = " + sk.Decrypt(pk.EAdd(one, one), pk).String())
