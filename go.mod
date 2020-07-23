@@ -1,4 +1,4 @@
-module bgn
+module github.com/sachaservan/bgn
 
 go 1.13
 
