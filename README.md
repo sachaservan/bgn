@@ -1,6 +1,6 @@
 ![golangci-lint](https://github.com/sachaservan/bgn/workflows/golangci-lint/badge.svg)
 
-# BGN
+# BGN 🔐
 Boneh Goh Nissim (BGN) crypto system implementation in Golang.
 
 ### Installation
@@ -53,6 +53,6 @@ $ go test
 $ go test -bench=.
 ```
 
-# Disclaimer
+# Disclaimer ⚠️
 **None of the cryptography used in this project was verified by experts. The code is intended to be used for research purposes only. DO NOT USE THIS CODE IN PRODUCTION.**
 
