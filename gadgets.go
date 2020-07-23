@@ -85,7 +85,11 @@ func hash(proof *ProofOfPlaintextKnowledge) *big.Int {
 	bytes = append(bytes, proof.Nonce.C.Bytes()...)
 
 	h := sha256.New()
-	h.Write([]byte(bytes))
+	_, err := h.Write([]byte(bytes))
+	if err != nil {
+		panic(err)
+	}
+
 	hash := h.Sum(nil)
 
 	return new(big.Int).SetBytes(hash)

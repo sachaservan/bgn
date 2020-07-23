@@ -108,7 +108,11 @@ func TestProofOfPlaintextKnowledgeBad(t *testing.T) {
 }
 
 func BenchmarkProofOfPlaintextKnowledgeGen(b *testing.B) {
-	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	pk, sk, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
+
 	r := newCryptoRandom(pk.N)
 	v := newCryptoRandom(pk.N)
 
@@ -119,7 +123,11 @@ func BenchmarkProofOfPlaintextKnowledgeGen(b *testing.B) {
 }
 
 func BenchmarkProofOfPlaintextKnowledgeVerify(b *testing.B) {
-	pk, sk, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	pk, sk, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
+
 	r := newCryptoRandom(pk.N)
 	v := newCryptoRandom(pk.N)
 	ct := pk.EncryptWithRandomness(v, r)

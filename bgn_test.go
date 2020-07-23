@@ -15,12 +15,18 @@ const DET = true // deterministic ops
 func BenchmarkKeyGen(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
-		NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+		_, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
 func BenchmarkAdd(b *testing.B) {
-	pk, _, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
 
 	c := pk.Encrypt(big.NewInt(1))
 
@@ -32,7 +38,10 @@ func BenchmarkAdd(b *testing.B) {
 }
 
 func BenchmarkMultConstant(b *testing.B) {
-	pk, _, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
 
 	c := pk.Encrypt(big.NewInt(1))
 
@@ -44,7 +53,10 @@ func BenchmarkMultConstant(b *testing.B) {
 }
 
 func BenchmarkMult(b *testing.B) {
-	pk, _, _ := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
 
 	c := pk.Encrypt(big.NewInt(1))
 
