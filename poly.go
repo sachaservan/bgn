@@ -57,7 +57,7 @@ func (pk *PublicKey) NegPoly(ct *PolyCiphertext) *PolyCiphertext {
 // EvalPoly homomorphically evaluates the polynomial on the base
 func (pk *PublicKey) EvalPoly(ct *PolyCiphertext) *Ciphertext {
 	acc := pk.EncryptDeterministic(big.NewInt(0))
-	x := big.NewInt(int64(pk.PolyBase))
+	x := big.NewInt(int64(pk.PolyEncodingParams.PolyBase))
 
 	for i := ct.Degree - 1; i >= 0; i-- {
 		acc = pk.MultConst(acc, x)
@@ -206,12 +206,15 @@ func (pk *PublicKey) AddPoly(pct1 *PolyCiphertext, pct2 *PolyCiphertext) *PolyCi
 	return &PolyCiphertext{result, degree, ct1.ScaleFactor, ct1.L2}
 }
 
-func (pk *PublicKey) alignPolyCiphertexts(ct1 *PolyCiphertext, ct2 *PolyCiphertext, level2 bool) (*PolyCiphertext, *PolyCiphertext) {
+func (pk *PublicKey) alignPolyCiphertexts(
+	ct1 *PolyCiphertext,
+	ct2 *PolyCiphertext,
+	level2 bool) (*PolyCiphertext, *PolyCiphertext) {
 
 	if ct1.ScaleFactor > ct2.ScaleFactor {
 		diff := ct1.ScaleFactor - ct2.ScaleFactor
 
-		ct2 = pk.MultConstPoly(ct2, big.NewFloat(math.Pow(float64(pk.FPScaleBase), float64(diff))))
+		ct2 = pk.MultConstPoly(ct2, big.NewFloat(math.Pow(float64(pk.PolyEncodingParams.FPScaleBase), float64(diff))))
 		ct2.ScaleFactor = ct1.ScaleFactor
 
 	} else if ct2.ScaleFactor > ct1.ScaleFactor {

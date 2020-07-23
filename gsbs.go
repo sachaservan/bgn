@@ -41,7 +41,7 @@ func computeTableGT(gen *pbc.Element, bound int64) {
 func (pk *PublicKey) PrecomputeTables(genG1 *pbc.Element, genGT *pbc.Element) {
 
 	// sqrt of the largest possible message
-	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64())))) + 1
+	bound := int64(math.Ceil(math.Sqrt(float64(pk.MsgSpace.Int64())))) + 1
 
 	// pre-compute the tables for the giant steps
 	computeTableGT(genGT, bound)
@@ -57,7 +57,7 @@ func (pk *PublicKey) getDL(csk *pbc.Element, gsk *pbc.Element, l2 bool) (*big.In
 		panic("DL tables not computed!")
 	}
 
-	bound := int64(math.Ceil(math.Sqrt(float64(pk.T.Int64()))))
+	bound := int64(math.Ceil(math.Sqrt(float64(pk.MsgSpace.Int64()))))
 
 	aux := csk.NewFieldElement()
 

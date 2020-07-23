@@ -42,7 +42,7 @@ func (pk *PublicKey) NewProofOfPlaintextKnowledge(sk *SecretKey, v *big.Int, z *
 	DL := big.NewInt(0)
 	DL.Add(DL, nonce1)                      // r
 	DL.Add(DL, new(big.Int).Mul(nonce2, v)) // r + cv
-	tmp := new(big.Int).Mul(pk.R, z)
+	tmp := new(big.Int).Mul(sk.R, z)
 	tmp.Mul(tmp, nonce2)                         // Rzc
 	tmp.Mul(tmp, new(big.Int).Div(pk.N, sk.Key)) // Rzcq
 	DL.Add(DL, tmp)                              //  r + cv + Rzcq

@@ -40,20 +40,25 @@ func (pk *PublicKey) NewUnbalancedPlaintext(m *big.Float) *PolyPlaintext {
 	mFloat, _ := m.Float64()
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), pk.FPScaleBase, pk.FPPrecision)
+		numerator, scaleFactor := rationalize(
+			mFloat-math.Floor(mFloat),
+			pk.PolyEncodingParams.FPScaleBase,
+			pk.PolyEncodingParams.FPPrecision,
+		)
+
 		mInt := big.NewInt(0)
 		m.Int(mInt)
-		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
+		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.PolyEncodingParams.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
 
-		coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+		coeffs, degree := unbalancedEncode(mInt, pk.PolyEncodingParams.PolyBase, degreeTable, degreeSumTable)
 		return &PolyPlaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	// m is a big.Int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
-	coeffs, degree := unbalancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+	coeffs, degree := unbalancedEncode(mInt, pk.PolyEncodingParams.PolyBase, degreeTable, degreeSumTable)
 	return &PolyPlaintext{pk, coeffs, degree, 0}
 }
 
@@ -70,26 +75,31 @@ func (pk *PublicKey) NewPolyPlaintext(m *big.Float) *PolyPlaintext {
 	// m is a rational number, encode it rationally
 	if math.Remainder(mFloat, 1.0) != 0.0 {
 
-		numerator, scaleFactor := rationalize(mFloat-math.Floor(mFloat), pk.FPScaleBase, pk.FPPrecision)
+		numerator, scaleFactor := rationalize(
+			mFloat-math.Floor(mFloat),
+			pk.PolyEncodingParams.FPScaleBase,
+			pk.PolyEncodingParams.FPPrecision,
+		)
+
 		mInt := big.NewInt(0)
 		m.Int(mInt)
-		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.FPScaleBase), float64(scaleFactor)))))
+		mInt.Mul(mInt, big.NewInt(int64(math.Pow(float64(pk.PolyEncodingParams.FPScaleBase), float64(scaleFactor)))))
 		mInt.Add(mInt, big.NewInt(numerator))
 
-		coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+		coeffs, degree := balancedEncode(mInt, pk.PolyEncodingParams.PolyBase, degreeTable, degreeSumTable)
 		return &PolyPlaintext{pk, coeffs, degree, scaleFactor}
 	}
 
 	//m is an int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
-	coeffs, degree := balancedEncode(mInt, pk.PolyBase, degreeTable, degreeSumTable)
+	coeffs, degree := balancedEncode(mInt, pk.PolyEncodingParams.PolyBase, degreeTable, degreeSumTable)
 	return &PolyPlaintext{pk, coeffs, degree, 0}
 }
 
 func (pk *PublicKey) computeEncodingTable() {
 
-	base := big.NewInt(int64(pk.PolyBase))
+	base := big.NewInt(int64(pk.PolyEncodingParams.PolyBase))
 	bound := degreeBound
 
 	degreeTable = make([]*big.Int, bound)
@@ -300,7 +310,7 @@ func rationalize(x float64, base int, precision float64) (int64, int) {
 func (p *PolyPlaintext) PolyEval() *big.Float {
 
 	acc := big.NewFloat(0.0)
-	x := big.NewFloat(float64(p.Pk.PolyBase))
+	x := big.NewFloat(float64(p.Pk.PolyEncodingParams.PolyBase))
 
 	for i := p.Degree - 1; i >= 0; i-- {
 		acc.Mul(acc, x)
@@ -308,7 +318,8 @@ func (p *PolyPlaintext) PolyEval() *big.Float {
 	}
 
 	if p.ScaleFactor != 0 {
-		scale := big.NewInt(0).Exp(big.NewInt(int64(p.Pk.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
+		scale := big.NewInt(0).Exp(
+			big.NewInt(int64(p.Pk.PolyEncodingParams.FPScaleBase)), big.NewInt(int64(p.ScaleFactor)), nil)
 		denom := big.NewFloat(0.0).SetInt(scale)
 		res := acc.Quo(acc, denom)
 
