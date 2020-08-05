@@ -113,6 +113,17 @@ func NewKeyGen(keyBits int, msgSpace *big.Int, polyBase int, fpScaleBase int, fp
 	return pk, sk, err
 }
 
+// ComputeDecryptionPreprocessing computes necessary values
+// for decrypting via discrete log
+func ComputeDecryptionPreprocessing(pk *PublicKey, sk *SecretKey) {
+	genG1 := pk.P.NewFieldElement()
+	genG1.PowBig(pk.P, sk.Key)
+
+	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
+	genGT.PowBig(genGT, sk.Key)
+	pk.PrecomputeTables(genG1, genGT)
+}
+
 func newPrimeTuple(bitLength int) (*big.Int, *big.Int, error) {
 
 	q1, err := rand.Prime(rand.Reader, bitLength/2)
@@ -337,17 +348,17 @@ func (pk *PublicKey) recoverMessage(gsk *pbc.Element, csk *pbc.Element, l2 bool)
 }
 
 // Sub homomorphically subtracts two encrypted values and returns the result
-func (pk *PublicKey) Sub(coeff1 *Ciphertext, coeff2 *Ciphertext) *Ciphertext {
+func (pk *PublicKey) Sub(a *Ciphertext, b *Ciphertext) *Ciphertext {
 
-	ct1 := coeff1
-	ct2 := coeff2
+	ct1 := a
+	ct2 := b
 
-	if coeff1.L2 && !coeff2.L2 {
-		ct2 = pk.makeL2(coeff2)
+	if a.L2 && !b.L2 {
+		ct2 = pk.makeL2(b)
 	}
 
-	if !coeff1.L2 && coeff2.L2 {
-		ct1 = pk.makeL2(coeff1)
+	if !a.L2 && b.L2 {
+		ct1 = pk.makeL2(a)
 	}
 
 	if ct1.L2 != ct2.L2 {
@@ -404,17 +415,17 @@ func (pk *PublicKey) Neg(c *Ciphertext) *Ciphertext {
 }
 
 // Add homomorphically adds two encrypted values and returns the result
-func (pk *PublicKey) Add(coeff1 *Ciphertext, coeff2 *Ciphertext) *Ciphertext {
+func (pk *PublicKey) Add(a *Ciphertext, b *Ciphertext) *Ciphertext {
 
-	ct1 := coeff1
-	ct2 := coeff2
+	ct1 := a
+	ct2 := b
 
-	if coeff1.L2 && !coeff2.L2 {
-		ct2 = pk.makeL2(coeff2)
+	if a.L2 && !b.L2 {
+		ct2 = pk.makeL2(b)
 	}
 
-	if !coeff1.L2 && coeff2.L2 {
-		ct1 = pk.makeL2(coeff1)
+	if !a.L2 && b.L2 {
+		ct1 = pk.makeL2(a)
 	}
 
 	if ct1.L2 && ct2.L2 {

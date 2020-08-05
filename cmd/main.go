@@ -24,13 +24,7 @@ func main() {
 func runPolyArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fpScaleBase int, fpPrecision float64) {
 
 	pk, sk, _ := bgn.NewKeyGen(keyBits, messageSpace, polyBase, fpScaleBase, fpPrecision, true)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	bgn.ComputeDecryptionPreprocessing(pk, sk)
 
 	m1 := pk.NewPolyPlaintext(big.NewFloat(0.0111))
 	m2 := pk.NewPolyPlaintext(big.NewFloat(9.1))
@@ -80,13 +74,7 @@ func runPolyArithmeticCheck(keyBits int, messageSpace *big.Int, polyBase int, fp
 func runSimpleCheck(keyBits int, polyBase int) {
 
 	pk, sk, _ := bgn.NewKeyGen(keyBits, big.NewInt(1021), polyBase, 3, 2, true)
-
-	genG1 := pk.P.NewFieldElement()
-	genG1.PowBig(pk.P, sk.Key)
-
-	genGT := pk.Pairing.NewGT().Pair(pk.P, pk.P)
-	genGT.PowBig(genGT, sk.Key)
-	pk.PrecomputeTables(genG1, genGT)
+	bgn.ComputeDecryptionPreprocessing(pk, sk)
 
 	zero := pk.Encrypt(big.NewInt(0))
 	one := pk.Encrypt(big.NewInt(1))
