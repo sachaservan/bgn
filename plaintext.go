@@ -70,6 +70,11 @@ func (pk *PublicKey) NewPolyPlaintext(m *big.Float) *PolyPlaintext {
 		panic("Encoding tables not computed!")
 	}
 
+	if m.Cmp(big.NewFloat(0)) < 0 {
+		panic("negative encodings not implemented")
+	}
+
+	// TODO: don't convert to float64
 	mFloat, _ := m.Float64()
 
 	// m is a rational number, encode it rationally
@@ -90,7 +95,7 @@ func (pk *PublicKey) NewPolyPlaintext(m *big.Float) *PolyPlaintext {
 		return &PolyPlaintext{pk, coeffs, degree, scaleFactor}
 	}
 
-	//m is an int
+	// m is an int
 	mInt := big.NewInt(0)
 	m.Int(mInt)
 	coeffs, degree := balancedEncode(mInt, pk.PolyEncodingParams.PolyBase, degreeTable, degreeSumTable)
