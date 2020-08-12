@@ -1,7 +1,9 @@
 package bgn
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/gob"
 	"log"
 	"math/big"
 	"strconv"
@@ -33,6 +35,19 @@ type PublicKey struct {
 
 	PolyEncodingParams *PolyEncodingParams // message encoding parameters
 	mu                 sync.Mutex          // mutex for parallel executions (pbc is not thread-safe)
+}
+
+// publicKeyWrapper is a wrapper for the BGN PublicKey struct
+// for marshalling/unmarshalling purposes since pbc.Element does not export fields
+type publicKeyWrapper struct {
+	G1 []byte
+	P  []byte
+	Q  []byte
+	N  *big.Int
+
+	MsgSpace           *big.Int
+	Deterministic      bool
+	PolyEncodingParams *PolyEncodingParams // message encoding parameters
 }
 
 // SecretKey used for decryption of PolyCiphertexts
@@ -503,4 +518,63 @@ func parseLFromPBCParams(params *pbc.Params) (*big.Int, error) {
 	}
 
 	return big.NewInt(lInt), nil
+}
+
+// MarshalBinary is needed in order to encode/decode
+// pbc.Element type since it has no exported fields
+func (pk *PublicKey) MarshalBinary() ([]byte, error) {
+
+	// wrap struct
+	w := publicKeyWrapper{
+		G1:                 pk.G1.Bytes(),
+		P:                  pk.P.Bytes(),
+		Q:                  pk.Q.Bytes(),
+		N:                  pk.N,
+		MsgSpace:           pk.MsgSpace,
+		Deterministic:      pk.Deterministic,
+		PolyEncodingParams: pk.PolyEncodingParams,
+	}
+
+	// use default gob encoder
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(w); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// UnmarshalBinary is needed in order to encode/decode
+// pbc.Element type since it has no exported fields
+func (pk *PublicKey) UnmarshalBinary(data []byte) error {
+	w := publicKeyWrapper{}
+
+	reader := bytes.NewReader(data)
+	dec := gob.NewDecoder(reader)
+	if err := dec.Decode(&w); err != nil {
+		return err
+	}
+
+	G1 := &pbc.Element{}
+	G1.SetBytes(w.G1)
+
+	P := &pbc.Element{}
+	P.SetBytes(w.P)
+
+	Q := &pbc.Element{}
+	Q.SetBytes(w.Q)
+
+	params := pbc.GenerateA1(w.N)
+	pairing := pbc.NewPairing(params)
+
+	pk.G1 = G1
+	pk.P = P
+	pk.Q = Q
+	pk.N = w.N
+	pk.MsgSpace = w.MsgSpace
+	pk.Pairing = pairing
+	pk.Deterministic = w.Deterministic
+	pk.PolyEncodingParams = w.PolyEncodingParams
+
+	return nil
 }
