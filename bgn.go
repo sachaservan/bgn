@@ -31,7 +31,8 @@ type PublicKey struct {
 
 	MsgSpace      *big.Int     // valid message space for decryption (will not try to decrypt values beyond this range)
 	Pairing       *pbc.Pairing // pairing between G1 and GT
-	Deterministic bool         // whether or not the homomorphic operations are deterministic
+	PairingParams string
+	Deterministic bool // whether or not the homomorphic operations are deterministic
 
 	PolyEncodingParams *PolyEncodingParams // message encoding parameters
 	mu                 sync.Mutex          // mutex for parallel executions (pbc is not thread-safe)
@@ -46,6 +47,7 @@ type publicKeyWrapper struct {
 	N  *big.Int
 
 	MsgSpace           *big.Int
+	PairingParams      string
 	Deterministic      bool
 	PolyEncodingParams *PolyEncodingParams // message encoding parameters
 }
@@ -62,6 +64,10 @@ func NewKeyGen(keyBits int, msgSpace *big.Int, polyBase int, fpScaleBase int, fp
 
 	if keyBits < 16 {
 		panic("key bits must be >= 16 bits in length")
+	}
+
+	if keyBits%2 != 0 {
+		panic("key bits must be divisible by 2")
 	}
 
 	var q1 *big.Int    // random prime
@@ -83,6 +89,7 @@ func NewKeyGen(keyBits int, msgSpace *big.Int, polyBase int, fpScaleBase int, fp
 	// compute the product of the primes
 	n = big.NewInt(0).Mul(q1, q2)
 	params := pbc.GenerateA1(n)
+	paramsString := params.String()
 
 	if err != nil {
 		return nil, nil, err
@@ -114,7 +121,7 @@ func NewKeyGen(keyBits int, msgSpace *big.Int, polyBase int, fpScaleBase int, fp
 	}
 
 	// create public key with the generated groups
-	pk := &PublicKey{G1, P, Q, n, msgSpace, pairing, deterministic, polyParams, sync.Mutex{}}
+	pk := &PublicKey{G1, P, Q, n, msgSpace, pairing, paramsString, deterministic, polyParams, sync.Mutex{}}
 
 	// create secret key
 	sk := &SecretKey{q1, R, polyBase}
@@ -564,17 +571,19 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	G1 := pk.G1.NewFieldElement()
+	pairing, err := pbc.NewPairingFromString(w.PairingParams)
+	if err != nil {
+		return err
+	}
+
+	G1 := pairing.NewG1()
 	G1.SetBytes(w.G1)
 
-	P := pk.G1.NewFieldElement()
+	P := G1.NewFieldElement()
 	P.SetBytes(w.P)
 
-	Q := pk.G1.NewFieldElement()
+	Q := G1.NewFieldElement()
 	Q.SetBytes(w.Q)
-
-	params := pbc.GenerateA1(w.N)
-	pairing := pbc.NewPairing(params)
 
 	pk.G1 = G1
 	pk.P = P
