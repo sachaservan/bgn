@@ -96,10 +96,10 @@ func (ct *Ciphertext) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	el := pbc.Element{}
+	el := ct.C.NewFieldElement()
 	el.SetBytes(w.C)
 
-	ct.C = &el
+	ct.C = el
 	ct.L2 = w.L2
 
 	return nil

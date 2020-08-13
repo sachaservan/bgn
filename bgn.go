@@ -555,13 +555,13 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	G1 := &pbc.Element{}
+	G1 := pk.G1.NewFieldElement()
 	G1.SetBytes(w.G1)
 
-	P := &pbc.Element{}
+	P := pk.G1.NewFieldElement()
 	P.SetBytes(w.P)
 
-	Q := &pbc.Element{}
+	Q := pk.G1.NewFieldElement()
 	Q.SetBytes(w.Q)
 
 	params := pbc.GenerateA1(w.N)

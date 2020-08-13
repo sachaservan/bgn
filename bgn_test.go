@@ -12,6 +12,17 @@ const FPSCALEBASE = 3
 const FPPREC = 0.0001
 const DET = true // deterministic ops
 
+func TestMarshalUnmarshalPublicKey(t *testing.T) {
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
+
+	bytes, _ := pk.MarshalBinary()
+	pk.UnmarshalBinary(bytes)
+
+}
+
 func BenchmarkKeyGen(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
