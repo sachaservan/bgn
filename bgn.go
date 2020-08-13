@@ -593,6 +593,7 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 	pk.Pairing = pairing
 	pk.Deterministic = w.Deterministic
 	pk.PolyEncodingParams = w.PolyEncodingParams
+	pk.PairingParams = w.PairingParams
 
 	return nil
 }

@@ -45,6 +45,22 @@ func TestMarshalUnmarshalCiphertext(t *testing.T) {
 	tct.UnmarshalBinary(bytes)
 }
 
+func TestMarshalUnmarshalPolyCiphertext(t *testing.T) {
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	m := pk.NewPolyPlaintext(big.NewFloat(2.99))
+	ct := pk.EncryptPoly(m)
+	tct := &TransportablePolyCiphertext{ct, pk.PairingParams}
+
+	bytes, _ := tct.MarshalBinary()
+
+	tct = &TransportablePolyCiphertext{}
+	tct.UnmarshalBinary(bytes)
+}
+
 func TestMarshalUnmarshalPublicKeyNil(t *testing.T) {
 	pk := &PublicKey{}
 	bytes, _ := pk.MarshalBinary()
@@ -55,6 +71,13 @@ func TestMarshalUnmarshalPublicKeyNil(t *testing.T) {
 func TestMarshalUnmarshalCiphertextNil(t *testing.T) {
 
 	ct := &TransportableCiphertext{}
+	bytes, _ := ct.MarshalBinary()
+	ct.UnmarshalBinary(bytes)
+}
+
+func TestMarshalUnmarshalPolyCiphertextNil(t *testing.T) {
+
+	ct := &TransportablePolyCiphertext{}
 	bytes, _ := ct.MarshalBinary()
 	ct.UnmarshalBinary(bytes)
 }
