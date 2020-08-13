@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/gob"
+	"fmt"
 	"log"
 	"math/big"
 	"strconv"
@@ -544,6 +545,7 @@ func (pk *PublicKey) MarshalBinary() ([]byte, error) {
 		MsgSpace:           pk.MsgSpace,
 		Deterministic:      pk.Deterministic,
 		PolyEncodingParams: pk.PolyEncodingParams,
+		PairingParams:      pk.PairingParams,
 	}
 
 	// use default gob encoder
@@ -571,10 +573,13 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	pairing, err := pbc.NewPairingFromString(w.PairingParams)
+	params, err := pbc.NewParamsFromString(w.PairingParams)
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
+
+	pairing := pbc.NewPairing(params)
 
 	G1 := pairing.NewG1()
 	G1.SetBytes(w.G1)

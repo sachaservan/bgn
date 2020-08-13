@@ -14,11 +14,6 @@ const DET = true // deterministic ops
 
 func TestMarshalUnmarshalPublicKey(t *testing.T) {
 
-	// THere is a bug with the PBC lib that prevents this test from playing nice
-	// with the other tests (something about generating a pairing from string)
-	// the test works fine on its own but not when running `go test`
-	t.SkipNow()
-
 	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
 	if err != nil {
 		t.Fatalf("%v", err)
