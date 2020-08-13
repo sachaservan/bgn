@@ -17,7 +17,7 @@ type Ciphertext struct {
 // TransportableCiphertext can be marshalled and unmarshalled
 // but requires keeping PairingParams for doing so
 type TransportableCiphertext struct {
-	*Ciphertext
+	Ciphertext
 	PairingParams string
 }
 
@@ -95,7 +95,7 @@ func (ct *PolyCiphertext) String() string {
 // pbc.Element type since it has no exported fields
 func (ct *TransportableCiphertext) MarshalBinary() ([]byte, error) {
 
-	if ct == nil || ct.Ciphertext == nil {
+	if ct == nil || ct.C == nil {
 		return nil, nil
 	}
 
@@ -119,7 +119,7 @@ func (ct *TransportableCiphertext) MarshalBinary() ([]byte, error) {
 // pbc.Element type since it has no exported fields
 func (ct *TransportableCiphertext) UnmarshalBinary(data []byte) error {
 
-	if len(data) == 0 || ct.Ciphertext == nil {
+	if len(data) == 0 {
 		return nil
 	}
 

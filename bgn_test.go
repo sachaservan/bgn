@@ -32,7 +32,7 @@ func TestMarshalUnmarshalCiphertext(t *testing.T) {
 	}
 
 	ct := pk.encryptZero()
-	tct := &TransportableCiphertext{ct, pk.PairingParams}
+	tct := &TransportableCiphertext{Ciphertext{ct.C, ct.L2}, pk.PairingParams}
 
 	bytes, _ := tct.MarshalBinary()
 
