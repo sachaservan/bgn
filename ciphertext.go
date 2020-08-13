@@ -70,6 +70,10 @@ func (ct *PolyCiphertext) String() string {
 // pbc.Element type since it has no exported fields
 func (ct *Ciphertext) MarshalBinary() ([]byte, error) {
 
+	if ct.C == nil {
+		return []byte(""), nil
+	}
+
 	// wrap struct
 	w := ciphertextWrapper{
 		C:  ct.C.Bytes(),
@@ -88,6 +92,11 @@ func (ct *Ciphertext) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary is needed in order to encode/decode
 // pbc.Element type since it has no exported fields
 func (ct *Ciphertext) UnmarshalBinary(data []byte) error {
+
+	if len(data) == 0 {
+		return nil
+	}
+
 	w := ciphertextWrapper{}
 
 	reader := bytes.NewReader(data)

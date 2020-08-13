@@ -35,6 +35,20 @@ func TestMarshalUnmarshalCiphertext(t *testing.T) {
 	ct.UnmarshalBinary(bytes)
 }
 
+func TestMarshalUnmarshalPublicKeyNil(t *testing.T) {
+	pk := &PublicKey{}
+	bytes, _ := pk.MarshalBinary()
+	pk.UnmarshalBinary(bytes)
+
+}
+
+func TestMarshalUnmarshalCiphertextNil(t *testing.T) {
+
+	ct := &Ciphertext{}
+	bytes, _ := ct.MarshalBinary()
+	ct.UnmarshalBinary(bytes)
+}
+
 func BenchmarkKeyGen(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {

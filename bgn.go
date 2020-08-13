@@ -524,6 +524,10 @@ func parseLFromPBCParams(params *pbc.Params) (*big.Int, error) {
 // pbc.Element type since it has no exported fields
 func (pk *PublicKey) MarshalBinary() ([]byte, error) {
 
+	if pk.N == nil {
+		return []byte(""), nil
+	}
+
 	// wrap struct
 	w := publicKeyWrapper{
 		G1:                 pk.G1.Bytes(),
@@ -547,6 +551,11 @@ func (pk *PublicKey) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary is needed in order to encode/decode
 // pbc.Element type since it has no exported fields
 func (pk *PublicKey) UnmarshalBinary(data []byte) error {
+
+	if len(data) == 0 {
+		return nil
+	}
+
 	w := publicKeyWrapper{}
 
 	reader := bytes.NewReader(data)
