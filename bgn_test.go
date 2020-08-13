@@ -37,7 +37,10 @@ func TestMarshalUnmarshalCiphertext(t *testing.T) {
 	bytes, _ := tct.MarshalBinary()
 
 	tct = &TransportableCiphertext{}
-	tct.UnmarshalBinary(bytes)
+	err = tct.UnmarshalBinary(bytes)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 }
 
 func TestMarshalUnmarshalPolyCiphertext(t *testing.T) {
@@ -53,28 +56,39 @@ func TestMarshalUnmarshalPolyCiphertext(t *testing.T) {
 	bytes, _ := tct.MarshalBinary()
 
 	tct = &TransportablePolyCiphertext{}
-	tct.UnmarshalBinary(bytes)
+	err = tct.UnmarshalBinary(bytes)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 }
 
 func TestMarshalUnmarshalPublicKeyNil(t *testing.T) {
 	pk := &PublicKey{}
 	bytes, _ := pk.MarshalBinary()
-	pk.UnmarshalBinary(bytes)
-
+	err := pk.UnmarshalBinary(bytes)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 }
 
 func TestMarshalUnmarshalCiphertextNil(t *testing.T) {
 
 	ct := &TransportableCiphertext{}
 	bytes, _ := ct.MarshalBinary()
-	ct.UnmarshalBinary(bytes)
+	err := ct.UnmarshalBinary(bytes)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 }
 
 func TestMarshalUnmarshalPolyCiphertextNil(t *testing.T) {
 
 	ct := &TransportablePolyCiphertext{}
 	bytes, _ := ct.MarshalBinary()
-	ct.UnmarshalBinary(bytes)
+	err := ct.UnmarshalBinary(bytes)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 }
 
 func BenchmarkKeyGen(b *testing.B) {
