@@ -14,6 +14,13 @@ type Ciphertext struct {
 	L2 bool         // indicates whether ciphertext is atlevel2
 }
 
+// TransportableCiphertext can be marshalled and unmarshalled
+// but requires keeping PairingParams for doing so
+type TransportableCiphertext struct {
+	*Ciphertext
+	PairingParams string
+}
+
 // PolyCiphertext is an encoding of a value in a
 // a given base (specified in the public key)
 // such an encoding is useful for reducing the impact of modular wrap around as
@@ -27,9 +34,10 @@ type PolyCiphertext struct {
 
 // ciphertextWrapper is a wrapper for the Ciphertext struct
 // for marshalling/unmarshalling purposes since pbc.Element does not export fields
-type ciphertextWrapper struct {
-	C  []byte
-	L2 bool
+type transporableCiphertextWrapper struct {
+	C             []byte
+	L2            bool
+	PairingParams string
 }
 
 // Copy returns a copy of the given ciphertext
@@ -68,16 +76,17 @@ func (ct *PolyCiphertext) String() string {
 
 // MarshalBinary is needed in order to encode/decode
 // pbc.Element type since it has no exported fields
-func (ct *Ciphertext) MarshalBinary() ([]byte, error) {
+func (ct *TransportableCiphertext) MarshalBinary() ([]byte, error) {
 
-	if ct.C == nil {
-		return []byte(""), nil
+	if ct == nil || ct.Ciphertext == nil {
+		return nil, nil
 	}
 
 	// wrap struct
-	w := ciphertextWrapper{
-		C:  ct.C.Bytes(),
-		L2: ct.L2,
+	w := transporableCiphertextWrapper{
+		C:             ct.C.Bytes(),
+		L2:            ct.L2,
+		PairingParams: ct.PairingParams,
 	}
 
 	// use default gob encoder
@@ -91,13 +100,13 @@ func (ct *Ciphertext) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary is needed in order to encode/decode
 // pbc.Element type since it has no exported fields
-func (ct *Ciphertext) UnmarshalBinary(data []byte) error {
+func (ct *TransportableCiphertext) UnmarshalBinary(data []byte) error {
 
-	if len(data) == 0 {
+	if len(data) == 0 || ct.Ciphertext == nil {
 		return nil
 	}
 
-	w := ciphertextWrapper{}
+	w := transporableCiphertextWrapper{}
 
 	reader := bytes.NewReader(data)
 	dec := gob.NewDecoder(reader)
@@ -105,10 +114,21 @@ func (ct *Ciphertext) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	el := ct.C.NewFieldElement()
-	el.SetBytes(w.C)
+	pairing, err := pbc.NewPairingFromString(w.PairingParams)
+	if err != nil {
+		return err
+	}
 
-	ct.C = el
+	if w.L2 {
+		el := pairing.NewGT().NewFieldElement()
+		el.SetBytes(w.C)
+		ct.C = el
+	} else {
+		el := pairing.NewG1().NewFieldElement()
+		el.SetBytes(w.C)
+		ct.C = el
+	}
+
 	ct.L2 = w.L2
 
 	return nil
