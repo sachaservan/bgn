@@ -23,6 +23,18 @@ func TestMarshalUnmarshalPublicKey(t *testing.T) {
 
 }
 
+func TestMarshalUnmarshalCiphertext(t *testing.T) {
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		panic(err)
+	}
+
+	ct := pk.encryptZero()
+
+	bytes, _ := ct.MarshalBinary()
+	ct.UnmarshalBinary(bytes)
+}
+
 func BenchmarkKeyGen(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
