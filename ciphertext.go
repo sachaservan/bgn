@@ -131,10 +131,12 @@ func (ct *TransportableCiphertext) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	pairing, err := pbc.NewPairingFromString(w.PairingParams)
+	params, err := pbc.NewParamsFromString(w.PairingParams)
 	if err != nil {
 		return err
 	}
+
+	pairing := pbc.NewPairing(params)
 
 	if w.L2 {
 		el := pairing.NewGT().NewFieldElement()
@@ -198,10 +200,12 @@ func (ct *TransportablePolyCiphertext) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	pairing, err := pbc.NewPairingFromString(w.PairingParams)
+	params, err := pbc.NewParamsFromString(w.PairingParams)
 	if err != nil {
 		return err
 	}
+
+	pairing := pbc.NewPairing(params)
 
 	coeffs := make([]*Ciphertext, 0)
 	for _, coeffBytes := range w.Coefficients {
