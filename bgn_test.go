@@ -58,6 +58,32 @@ func TestCiphertextToFromBytes(t *testing.T) {
 	}
 }
 
+func TestPolyCiphertextToFromBytes(t *testing.T) {
+
+	pk, _, err := NewKeyGen(KEYBITS, big.NewInt(MSGSPACE), POLYBASE, FPSCALEBASE, FPPREC, DET)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	m := pk.NewPolyPlaintext(big.NewFloat(2.99))
+
+	expected := pk.EncryptPoly(m)
+	bytes, err := expected.Bytes()
+	if err != nil {
+		t.Fatalf("Error when encoding ciphertext to bytes %v\n", err.Error())
+	}
+
+	recovered, err := pk.NewPolyCiphertextFromBytes(bytes)
+
+	if err != nil {
+		t.Fatalf("Error when recovering ciphertext from bytes %v\n", err.Error())
+	}
+
+	if expected.String() != recovered.String() {
+		t.Fatalf("Incorrect recovery.Expected %v, got %v\n", expected, recovered)
+	}
+}
+
 func BenchmarkKeyGen(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {

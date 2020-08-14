@@ -525,6 +525,40 @@ func (pk *PublicKey) NewCiphertextFromBytes(data []byte) (*Ciphertext, error) {
 
 }
 
+// NewPolyCiphertextFromBytes generates a poly ciphertext from marshalled poly ciphertext.
+// Requires the public key in order to ensure the correct pairing is used
+func (pk *PublicKey) NewPolyCiphertextFromBytes(data []byte) (*PolyCiphertext, error) {
+
+	if len(data) == 0 {
+		return nil, errors.New("no data provided")
+	}
+
+	w := polyCiphertextWrapper{}
+
+	reader := bytes.NewReader(data)
+	dec := gob.NewDecoder(reader)
+	if err := dec.Decode(&w); err != nil {
+		return nil, err
+	}
+
+	coeffs := make([]*Ciphertext, 0)
+	for _, coeffBytes := range w.CoeffBytes {
+
+		var elem *pbc.Element
+		if w.L2 {
+			elem = pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+			elem.SetBytes(coeffBytes)
+		} else {
+			elem = pk.G1.NewFieldElement()
+			elem.SetBytes(coeffBytes)
+		}
+
+		coeffs = append(coeffs, NewCiphertext(elem, w.L2))
+	}
+
+	return NewPolyCiphertext(coeffs, w.Degree, w.ScaleFactor, w.L2), nil
+}
+
 func (pk *PublicKey) encryptZero() *Ciphertext {
 	return pk.EncryptDeterministic(big.NewInt(0))
 }
