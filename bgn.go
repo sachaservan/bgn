@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -495,6 +496,35 @@ func (pk *PublicKey) Add(a *Ciphertext, b *Ciphertext) *Ciphertext {
 	return &Ciphertext{result, ct1.L2}
 }
 
+// NewCiphertextFromBytes generates a ciphertext from marshalled ciphertext.
+// Requires the public key in order to ensure the correct pairing is used
+func (pk *PublicKey) NewCiphertextFromBytes(data []byte) (*Ciphertext, error) {
+
+	if len(data) == 0 {
+		return nil, errors.New("no data provided")
+	}
+
+	w := ciphertextWrapper{}
+
+	reader := bytes.NewReader(data)
+	dec := gob.NewDecoder(reader)
+	if err := dec.Decode(&w); err != nil {
+		return nil, err
+	}
+
+	var elem *pbc.Element
+	if w.L2 {
+		elem = pk.Pairing.NewGT().Pair(pk.Q, pk.Q)
+		elem.SetBytes(w.CBytes)
+	} else {
+		elem = pk.G1.NewFieldElement()
+		elem.SetBytes(w.CBytes)
+	}
+
+	return NewCiphertext(elem, w.L2), nil
+
+}
+
 func (pk *PublicKey) encryptZero() *Ciphertext {
 	return pk.EncryptDeterministic(big.NewInt(0))
 }
@@ -573,13 +603,11 @@ func (pk *PublicKey) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
-	params, err := pbc.NewParamsFromString(w.PairingParams)
+	pairing, err := pbc.NewPairingFromString(w.PairingParams)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
-
-	pairing := pbc.NewPairing(params)
 
 	G1 := pairing.NewG1()
 	G1.SetBytes(w.G1)
