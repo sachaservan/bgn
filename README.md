@@ -31,7 +31,10 @@ To install the PBC library, download the appropriate files for your system from 
 $ sudo apt-get install build-essential flex bison
 ```
 The PBC source can be compiled and installed using the usual GNU Build System:
-
+```sh
+$ wget -c https://crypto.stanford.edu/pbc/files/pbc-0.5.14.tar.gz -O - | tar -xz
+$ cd pbc-0.5.14
+```
 ```sh
 $ ./configure
 $ make
